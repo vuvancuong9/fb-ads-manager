@@ -215,7 +215,7 @@ export default function AlertsPage() {
 
               <div className="flex items-center gap-2">
                 <Switch checked={includeSuggestions} onCheckedChange={setIncludeSuggestions} />
-                <label className="text-sm">Includi suggerimenti nell'alert</label>
+                <label className="text-sm">Includi suggerimenti nell&apos;alert</label>
               </div>
             </div>
             <DialogFooter>
