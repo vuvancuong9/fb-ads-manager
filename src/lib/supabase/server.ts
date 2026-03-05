@@ -1,17 +1,15 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://jbisrrqodxehgyokmuov.supabase.co'
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpiaXNycnFvZHhlaGd5b2ttdW92Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI3MDIzOTEsImV4cCI6MjA4ODI3ODM5MX0.r2gtSn_e4cK7vvJaqGO_6TNysXXw6_DdddBcpsVyKGo'
+
 export async function createClient() {
   const cookieStore = await cookies()
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  if (!url || !key) {
-    throw new Error('Supabase environment variables not configured')
-  }
 
   return createServerClient(
-    url,
-    key,
+    SUPABASE_URL,
+    SUPABASE_ANON_KEY,
     {
       cookies: {
         getAll() {
@@ -32,11 +30,8 @@ export async function createClient() {
 }
 
 export async function createServiceClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !serviceKey) {
-    throw new Error('Supabase service environment variables not configured')
-  }
+  const url = SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
   const { createClient } = await import('@supabase/supabase-js')
   return createClient(url, serviceKey)
 }

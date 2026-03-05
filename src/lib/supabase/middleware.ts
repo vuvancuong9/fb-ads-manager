@@ -4,12 +4,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-  if (!supabaseUrl || !supabaseKey) {
-    return supabaseResponse
-  }
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://jbisrrqodxehgyokmuov.supabase.co'
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpiaXNycnFvZHhlaGd5b2ttdW92Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI3MDIzOTEsImV4cCI6MjA4ODI3ODM5MX0.r2gtSn_e4cK7vvJaqGO_6TNysXXw6_DdddBcpsVyKGo'
 
   const supabase = createServerClient(
     supabaseUrl,
