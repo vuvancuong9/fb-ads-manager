@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { createClient } from "@/lib/supabase/client"
 import { useAppStore } from "@/lib/store"
 import type { Profile, FbAdAccount } from "@/types/database"
 
@@ -19,11 +18,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setProfile(profile as Profile)
         }
 
-        const supabase = createClient()
-        const { data: accounts } = await supabase
-          .from("fb_ad_accounts")
-          .select("*")
-          .order("name")
+        const accRes = await fetch("/api/user/resources?type=accounts")
+        const { data: accounts } = await accRes.json()
 
         if (accounts) {
           setAccounts(accounts as FbAdAccount[])

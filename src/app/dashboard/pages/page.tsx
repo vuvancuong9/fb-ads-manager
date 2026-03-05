@@ -1,24 +1,26 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { FileText } from "lucide-react"
-import type { FbPage } from "@/types/database"
+
+interface FbPageItem {
+  id: string
+  page_id: string
+  name: string
+  fb_ad_account?: { name: string } | null
+}
 
 export default function PagesPage() {
-  const [fbPages, setFbPages] = useState<FbPage[]>([])
+  const [fbPages, setFbPages] = useState<FbPageItem[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const supabase = createClient()
-    async function load() {
-      const { data } = await supabase.from("fb_pages").select("*, fb_ad_account:fb_ad_accounts(name)")
-      setFbPages((data || []) as FbPage[])
-      setLoading(false)
-    }
-    load()
+    fetch("/api/user/resources?type=pages")
+      .then(r => r.json())
+      .then(({ data }) => { setFbPages(data || []); setLoading(false) })
+      .catch(() => setLoading(false))
   }, [])
 
   if (loading) {
@@ -35,12 +37,11 @@ export default function PagesPage() {
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Pagine Facebook</h1>
         <p className="text-gray-500">{fbPages.length} pagine disponibili</p>
       </div>
-
       {fbPages.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16">
             <FileText size={48} className="text-gray-300 mb-4" />
-            <p className="text-gray-500">Nessuna pagina trovata. Sincronizza gli account per importare le pagine.</p>
+            <p className="text-gray-500">Nessuna pagina assegnata.</p>
           </CardContent>
         </Card>
       ) : (
@@ -55,9 +56,11 @@ export default function PagesPage() {
                   <div>
                     <h3 className="font-semibold text-gray-900 dark:text-white">{page.name}</h3>
                     <p className="text-xs text-gray-400 mt-1">ID: {page.page_id}</p>
-                    <Badge variant="outline" className="mt-2 text-xs">
-                      {(page as unknown as { fb_ad_account?: { name: string } }).fb_ad_account?.name || "N/A"}
-                    </Badge>
+                    {page.fb_ad_account?.name && (
+                      <Badge variant="outline" className="mt-2 text-xs">
+                        {page.fb_ad_account.name}
+                      </Badge>
+                    )}
                   </div>
                 </div>
               </CardContent>
