@@ -13,17 +13,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const supabase = createClient()
 
     async function loadData() {
-      const { data: { user } } = await supabase.auth.getUser()
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      if (userError) console.error("Auth error:", userError)
       if (!user) {
         setLoaded(true)
         return
       }
 
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .select("*")
         .eq("id", user.id)
         .single()
+
+      if (profileError) console.error("Profile error:", profileError)
+      console.log("Profile loaded:", profile)
 
       if (profile) {
         setProfile(profile as Profile)
