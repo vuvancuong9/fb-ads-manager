@@ -80,14 +80,17 @@ export async function GET(request: NextRequest) {
 
     if (type === "insights") {
       const accountId = request.nextUrl.searchParams.get("accountId")
-      const date = request.nextUrl.searchParams.get("date") || new Date().toISOString().split("T")[0]
+      const dateFrom = request.nextUrl.searchParams.get("from")
+      const dateTo = request.nextUrl.searchParams.get("to")
+
+      const defaultFrom = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
+      const defaultTo = new Date().toISOString().split("T")[0]
+
+      const from = dateFrom || defaultFrom
+      const to = dateTo || defaultTo
 
       const buildQuery = (q: any) => {
-        if (date.length === 10 && !request.nextUrl.searchParams.has("range")) {
-          q = q.gte("date", date).order("date", { ascending: true })
-        } else {
-          q = q.eq("date", date)
-        }
+        q = q.gte("date", from).lte("date", to)
         if (accountId) q = q.eq("fb_ad_account_id", accountId)
         return q
       }

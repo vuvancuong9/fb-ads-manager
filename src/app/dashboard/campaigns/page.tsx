@@ -32,9 +32,24 @@ export default function CampaignsPage() {
     ])
 
     const insightMap: Record<string, CampaignInsight> = {}
-    ;(insightRes.data || []).forEach((i: CampaignInsight) => {
-      insightMap[i.campaign_id] = i
-    })
+    for (const i of (insightRes.data || []) as CampaignInsight[]) {
+      const existing = insightMap[i.campaign_id]
+      if (!existing) {
+        insightMap[i.campaign_id] = { ...i }
+      } else {
+        existing.spend += i.spend
+        existing.impressions += i.impressions
+        existing.clicks += i.clicks
+        existing.reach += i.reach
+        existing.conversions += i.conversions
+        existing.conversion_value += i.conversion_value
+        existing.ctr = existing.impressions > 0 ? (existing.clicks / existing.impressions) * 100 : 0
+        existing.cpc = existing.clicks > 0 ? existing.spend / existing.clicks : 0
+        existing.cpm = existing.impressions > 0 ? (existing.spend / existing.impressions) * 1000 : 0
+        existing.cost_per_conversion = existing.conversions > 0 ? existing.spend / existing.conversions : 0
+        existing.roas = existing.spend > 0 ? existing.conversion_value / existing.spend : 0
+      }
+    }
 
     setCampaigns((campRes.data || []) as Campaign[])
     setInsights(insightMap)
@@ -186,7 +201,7 @@ export default function CampaignsPage() {
                   <th className="text-left py-3 px-4 font-medium text-gray-500">Campagna</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-500">Account</th>
                   <th className="text-center py-3 px-4 font-medium text-gray-500">Stato</th>
-                  <th className="text-right py-3 px-4 font-medium text-gray-500">Spesa oggi</th>
+                  <th className="text-right py-3 px-4 font-medium text-gray-500">Spesa 7gg</th>
                   <th className="text-right py-3 px-4 font-medium text-gray-500">Impr.</th>
                   <th className="text-right py-3 px-4 font-medium text-gray-500">Click</th>
                   <th className="text-right py-3 px-4 font-medium text-gray-500">CTR</th>

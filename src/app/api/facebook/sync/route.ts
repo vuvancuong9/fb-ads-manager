@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     if (!account) return NextResponse.json({ error: "Nessun account trovato" }, { status: 404 })
 
     const today = new Date().toISOString().split("T")[0]
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
+    const weekAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
     const results = { campaigns: 0, insights: 0, account: account.name, errors: [] as string[] }
 
     // 1. Sync campaigns

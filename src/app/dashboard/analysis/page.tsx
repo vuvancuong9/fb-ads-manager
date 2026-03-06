@@ -35,7 +35,7 @@ export default function AnalysisPage() {
       const accParam = selectedAccountId ? `&accountId=${selectedAccountId}` : ""
       const [campRes, insightRes] = await Promise.all([
         fetch(`/api/user/resources?type=campaigns${accParam}`).then(r => r.json()),
-        fetch(`/api/user/resources?type=insights${accParam}&date=${dateFrom}`).then(r => r.json()),
+        fetch(`/api/user/resources?type=insights${accParam}&from=${dateFrom}&to=${dateTo}`).then(r => r.json()),
       ])
       setCampaigns((campRes.data || []) as Campaign[])
       let filteredInsights = (insightRes.data || []) as CampaignInsight[]
