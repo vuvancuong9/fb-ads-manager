@@ -20,6 +20,7 @@ export default function CampaignsPage() {
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [toggling, setToggling] = useState<string | null>(null)
+  const [syncResult, setSyncResult] = useState("")
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -44,11 +45,23 @@ export default function CampaignsPage() {
 
   const handleSync = async () => {
     setSyncing(true)
+    setSyncResult("Sincronizzazione in corso...")
     try {
-      await fetch("/api/facebook/sync", { method: "POST" })
+      const res = await fetch("/api/facebook/sync", { method: "POST" })
+      const data = await res.json()
+      if (data.error) {
+        setSyncResult(`Errore: ${data.error}`)
+      } else if (data.results) {
+        setSyncResult(`Sincronizzati: ${data.results.campaigns} campagne, ${data.results.insights} insights${data.results.errors?.length ? ` (${data.results.errors.length} errori)` : ""}`)
+      } else {
+        setSyncResult("Sync completata")
+      }
       await load()
+    } catch {
+      setSyncResult("Errore di connessione")
     } finally {
       setSyncing(false)
+      setTimeout(() => setSyncResult(""), 8000)
     }
   }
 
@@ -93,6 +106,7 @@ export default function CampaignsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Campagne</h1>
           <p className="text-gray-500">{campaigns.length} campagne totali</p>
+          {syncResult && <p className={`text-sm mt-1 ${syncResult.includes("Errore") ? "text-red-500" : "text-blue-500"}`}>{syncResult}</p>}
         </div>
         <Button onClick={handleSync} disabled={syncing}>
           <RefreshCw size={16} className={syncing ? "animate-spin" : ""} />
