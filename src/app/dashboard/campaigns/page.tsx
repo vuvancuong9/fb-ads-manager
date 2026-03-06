@@ -8,8 +8,14 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { formatCurrency, formatNumber, formatPercent, getStatusBadgeColor } from "@/lib/utils"
-import { Search, Play, Pause, RefreshCw } from "lucide-react"
+import { Search, Play, Pause, RefreshCw, Calendar } from "lucide-react"
 import type { Campaign, CampaignInsight } from "@/types/database"
+
+function daysAgo(n: number) {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return d.toISOString().split("T")[0]
+}
 
 export default function CampaignsPage() {
   const { selectedAccountId, accounts } = useAppStore()
@@ -21,6 +27,9 @@ export default function CampaignsPage() {
   const [statusFilter, setStatusFilter] = useState("all")
   const [toggling, setToggling] = useState<string | null>(null)
   const [syncResult, setSyncResult] = useState("")
+  const [dateFrom, setDateFrom] = useState(() => daysAgo(7))
+  const [dateTo, setDateTo] = useState(() => new Date().toISOString().split("T")[0])
+  const [dateLabel, setDateLabel] = useState("7g")
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -28,7 +37,7 @@ export default function CampaignsPage() {
     const accParam = selectedAccountId ? `&accountId=${selectedAccountId}` : ""
     const [campRes, insightRes] = await Promise.all([
       fetch(`/api/user/resources?type=campaigns${accParam}`).then(r => r.json()),
-      fetch(`/api/user/resources?type=insights${accParam}`).then(r => r.json()),
+      fetch(`/api/user/resources?type=insights${accParam}&from=${dateFrom}&to=${dateTo}`).then(r => r.json()),
     ])
 
     const insightMap: Record<string, CampaignInsight> = {}
@@ -54,7 +63,7 @@ export default function CampaignsPage() {
     setCampaigns((campRes.data || []) as Campaign[])
     setInsights(insightMap)
     setLoading(false)
-  }, [selectedAccountId])
+  }, [selectedAccountId, dateFrom, dateTo])
 
   useEffect(() => { load() }, [load])
 
@@ -168,8 +177,8 @@ export default function CampaignsPage() {
         </Button>
       </div>
 
-      <div className="flex items-center gap-4">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 max-w-sm min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
           <Input
             placeholder="Cerca campagna..."
@@ -179,7 +188,7 @@ export default function CampaignsPage() {
           />
         </div>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger className="w-[150px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -190,6 +199,50 @@ export default function CampaignsPage() {
             <SelectItem value="ARCHIVED">Archiviate</SelectItem>
           </SelectContent>
         </Select>
+        <div className="flex items-center gap-2 ml-auto">
+          <div className="flex gap-1">
+            {[
+              { label: "Oggi", days: 0 },
+              { label: "Ieri", days: 1 },
+              { label: "3g", days: 3 },
+              { label: "7g", days: 7 },
+              { label: "14g", days: 14 },
+              { label: "30g", days: 30 },
+            ].map(({ label, days }) => (
+              <Button
+                key={label}
+                variant={dateLabel === label ? "default" : "outline"}
+                size="sm"
+                className="px-2.5 text-xs h-8"
+                onClick={() => {
+                  const to = days === 1 ? daysAgo(1) : new Date().toISOString().split("T")[0]
+                  const from = days <= 1 ? to : daysAgo(days)
+                  setDateFrom(from)
+                  setDateTo(to)
+                  setDateLabel(label)
+                }}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Calendar size={14} className="text-gray-400" />
+            <Input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => { setDateFrom(e.target.value); setDateLabel("") }}
+              className="w-[130px] h-8 text-xs"
+            />
+            <span className="text-gray-400 text-xs">-</span>
+            <Input
+              type="date"
+              value={dateTo}
+              onChange={(e) => { setDateTo(e.target.value); setDateLabel("") }}
+              className="w-[130px] h-8 text-xs"
+            />
+          </div>
+        </div>
       </div>
 
       <Card>
@@ -201,7 +254,7 @@ export default function CampaignsPage() {
                   <th className="text-left py-3 px-4 font-medium text-gray-500">Campagna</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-500">Account</th>
                   <th className="text-center py-3 px-4 font-medium text-gray-500">Stato</th>
-                  <th className="text-right py-3 px-4 font-medium text-gray-500">Spesa 7gg</th>
+                  <th className="text-right py-3 px-4 font-medium text-gray-500">Spesa{dateLabel ? ` ${dateLabel}` : ""}</th>
                   <th className="text-right py-3 px-4 font-medium text-gray-500">Impr.</th>
                   <th className="text-right py-3 px-4 font-medium text-gray-500">Click</th>
                   <th className="text-right py-3 px-4 font-medium text-gray-500">CTR</th>
