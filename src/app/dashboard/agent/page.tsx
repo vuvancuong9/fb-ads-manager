@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react"
 import { createBrowserClient } from "@supabase/ssr"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Send, Bot, RefreshCw, Zap, TrendingDown, TrendingUp, BarChart3, Search } from "lucide-react"
+import { Send, Bot, RefreshCw, Zap, TrendingDown, TrendingUp, BarChart3, Search, Rocket, FileCode, Video, Target, Copy, Download, Globe, Eye, EyeOff } from "lucide-react"
 
 const AGENT_URL = "https://smwtkyvnmyetlektphyy.supabase.co"
 const AGENT_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNtd3RreXZubXlldGxla3RwaHl5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMzk1MzEsImV4cCI6MjA3NTYxNTUzMX0.9YhnYyA7n9qXMgIOvh64Z9-ylYADrW7x2SysbAGvVp0"
@@ -23,6 +23,9 @@ const QUICK_ACTIONS = [
   { label: "Ottimizza Budget", value: "optimize_budget", icon: Zap },
   { label: "Sincronizza", value: "sync_campaigns", icon: RefreshCw },
   { label: "Approval Rate TM", value: "check_approval", icon: Search },
+  { label: "Crea Landing", value: "prompt_landing", icon: FileCode },
+  { label: "Crea Video Ads", value: "prompt_video", icon: Video },
+  { label: "Funnel Completo", value: "prompt_funnel", icon: Rocket },
 ]
 
 const ACTION_PROMPTS: Record<string, string> = {
@@ -32,6 +35,9 @@ const ACTION_PROMPTS: Record<string, string> = {
   optimize_budget: "Analizza l'allocazione del budget attuale e suggerisci come redistribuirlo per massimizzare il ROAS.",
   sync_campaigns: "Sincronizza le campagne da Facebook per avere dati aggiornati.",
   check_approval: "Qual è l'approval rate attuale dal Traffic Manager? Analizza i dati e dimmi se ci sono problemi.",
+  prompt_landing: "Voglio creare una landing page per un prodotto. Guidami nel processo.",
+  prompt_video: "Voglio creare degli script per video ads. Guidami nel processo.",
+  prompt_funnel: "Voglio creare un funnel completo (landing + video ads + retargeting). Guidami nel processo.",
 }
 
 function formatTime() {
@@ -53,35 +59,62 @@ HAI ACCESSO AI DATI DEL TOOL IN TEMPO REALE:
 {CONTEXT}
 
 COSA PUOI FARE:
-- Analizzare le performance delle campagne (spesa, ROAS, CPA, CTR)
-- Suggerire ottimizzazioni (campagne da pausare, budget da spostare, targeting)
-- Identificare campagne in perdita (ROAS < 1) e campagne profittevoli
-- Analizzare l'approval rate dal Traffic Manager
-- Dare consigli strategici su scaling e budget allocation
-- ESEGUIRE azioni concrete: pausare/attivare campagne, cambiare budget
 
-AZIONI CHE PUOI ESEGUIRE (campo "suggestedAction"):
-- "sync_campaigns" — Sincronizza campagne da Facebook
-- "pause_campaign" — Pausa una campagna (OBBLIGATORIO: extractedData.campaignName)
-- "activate_campaign" — Attiva una campagna (OBBLIGATORIO: extractedData.campaignName)
-- "pause_multiple" — Pausa più campagne (OBBLIGATORIO: extractedData.campaignNames = array di nomi)
-- "activate_multiple" — Attiva più campagne (OBBLIGATORIO: extractedData.campaignNames = array)
-- "update_budget" — Cambia budget (OBBLIGATORIO: extractedData.campaignName + extractedData.budget in EUR)
-- "get_campaign_details" — Dettagli campagna (extractedData.campaignName)
+**ADS MANAGER:**
+- Analizzare performance campagne (spesa, ROAS, CPA, CTR)
+- Suggerire ottimizzazioni, pausare/attivare campagne, cambiare budget
+- Identificare campagne in perdita/profittevoli
+- Analizzare approval rate Traffic Manager
+- Sincronizzare dati da Facebook
+
+**FUNNEL BUILDER (via conversazione):**
+- Creare landing page (formato Elementor JSON) a partire dai dati prodotto
+- Tradurre landing in altre lingue
+- Modificare landing con istruzioni
+- Generare script video ads
+- Generare copy retargeting ads
+- Generare funnel completo (landing + video + retargeting)
+- Clonare landing da URL competitor
+- Generare sequenze email e campagne SMS
+
+Per la creazione contenuti, ESTRAI I DATI PRODOTTO dalla conversazione e salvali in extractedData:
+- nome, descrizione, prezzoP (prezzo pieno), prezzoS (prezzo scontato)
+- spedizione, garanzia, target, categoria (GADGET/HEALTH/BEAUTY/HOME/FOOD/TECH)
+- pageType (LANDING/ADVERTORIAL), copywritingFramework (AIDA/PAS/BAB/4P/STAR)
+
+AZIONI (campo "suggestedAction"):
+
+Ads Manager:
+- "sync_campaigns" — Sincronizza campagne
+- "pause_campaign" — extractedData.campaignName
+- "activate_campaign" — extractedData.campaignName
+- "pause_multiple" — extractedData.campaignNames[]
+- "activate_multiple" — extractedData.campaignNames[]
+- "update_budget" — extractedData.campaignName + extractedData.budget
+
+Funnel Builder:
+- "create_landing" — Genera landing (extractedData = dati prodotto)
+- "create_video_ads" — Genera script video ads (extractedData = dati prodotto)
+- "create_retargeting" — Genera retargeting ads (extractedData = dati prodotto)
+- "create_funnel" — Genera funnel completo (landing + video + retargeting)
+- "clone_landing" — Clona landing (extractedData.url)
+- "translate_landing" — Traduci landing (extractedData.lingua)
 
 REGOLE CRITICHE:
 - Rispondi SEMPRE in italiano
 - Usa i DATI REALI, NON inventare numeri
-- Quando l'utente dice "ok", "sì", "fai", "procedi", "vai", "fallo", "esegui" → autoExecute: true, confidence: 1.0
-- Quando l'utente ORDINA (es. "pausa X", "spegni X", "metti in pausa X") → autoExecute: true, confidence: 1.0
+- Quando l'utente conferma ("ok", "sì", "fai", "procedi", "vai", "fallo") → autoExecute: true, confidence: 1.0
+- Quando l'utente ORDINA direttamente → autoExecute: true, confidence: 1.0
 - "spegni" = pause_campaign, "accendi" = activate_campaign
-- "spegni tutte le campagne in perdita" → pause_multiple con nomi campagne ROAS < 1
-- SPECIFICA SEMPRE i nomi esatti in extractedData`
+- Per il funnel builder: quando hai raccolto abbastanza dati (almeno nome + descrizione), PROPONI di creare
+- NON fare questionari robotici — conversa naturalmente, chiedi info mancanti una alla volta
+- Se l'utente parla di un prodotto, analizzalo: punti di forza, target, angoli di vendita
+- SPECIFICA SEMPRE dati concreti in extractedData`
 
 export default function AgentPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([{
     role: "agent",
-    content: "Ciao! Sono il tuo **AI Assistant** per FB Ads Manager. Ho accesso a tutti i dati delle tue campagne, insights e Traffic Manager.\n\nPosso **analizzare, suggerire e anche eseguire azioni** — pausare campagne, cambiare budget, sincronizzare.\n\nDimmi \"pausa la campagna X\" e lo faccio. Dimmi \"spegni tutte quelle in perdita\" e le spengo.\n\nCosa vuoi fare?",
+    content: "Ciao! Sono il tuo **AI Assistant** per FB Ads Manager.\n\n**Ads Manager** — Analizzo campagne, suggerisco ottimizzazioni, pauso/attivo campagne, cambio budget.\n\n**Funnel Builder** — Creo landing page, script video ads, copy retargeting, funnel completi. Parlami del prodotto e ti guido.\n\nDimmi cosa ti serve!",
     time: formatTime(),
   }])
   const [input, setInput] = useState("")
@@ -95,6 +128,8 @@ export default function AgentPage() {
   const [checkingAuth, setCheckingAuth] = useState(true)
   const [chatHistory, setChatHistory] = useState<{ role: string; content: string }[]>([])
   const [toolContext, setToolContext] = useState<any>(null)
+  const [productData, setProductData] = useState<any>({})
+  const [generatedContent, setGeneratedContent] = useState<any>({})
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const agentSupabase = useRef(createBrowserClient(AGENT_URL, AGENT_KEY))
@@ -164,6 +199,139 @@ export default function AgentPage() {
     } catch { return "Errore nell'esecuzione" }
   }
 
+  const callEdgeFunction = async (action: string, data: any) => {
+    let session = agentSession
+    if (session.expires_at && session.expires_at * 1000 < Date.now() + 60000) {
+      const { data: refreshed } = await agentSupabase.current.auth.refreshSession()
+      if (refreshed?.session) { session = refreshed.session; setAgentSession(session) }
+    }
+    const res = await fetch(`${AGENT_URL}/functions/v1/funnel-builder-claude-v2`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": AGENT_KEY,
+        "Authorization": `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ action, userId: agentUser?.id, data }),
+    })
+    if (!res.ok) throw new Error(`Edge Function error: ${res.status}`)
+    return await res.json()
+  }
+
+  const executeFunnelAction = async (actionName: string, data: any): Promise<string> => {
+    try {
+      setProductData((prev: any) => ({ ...prev, ...data }))
+      const merged = { ...productData, ...data }
+
+      if (actionName === "create_landing") {
+        addMessage({ role: "system", content: "Generazione landing page in corso...", time: formatTime() })
+        const result = await callEdgeFunction("create", {
+          nome: merged.nome || "Prodotto",
+          descrizione: merged.descrizione || "",
+          prezzoP: merged.prezzoP || "",
+          prezzoS: merged.prezzoS || "",
+          scontoPerc: merged.scontoPerc || "",
+          spedizione: merged.spedizione || "",
+          garanzia: merged.garanzia || "",
+          target: merged.target || "",
+          categoria: merged.categoria || "GADGET",
+          pageType: merged.pageType || "LANDING",
+          copywritingFramework: merged.copywritingFramework || "AIDA",
+          lingua: merged.lingua || "Italiano",
+        })
+        if (result.landing) {
+          setGeneratedContent((prev: any) => ({ ...prev, landing: result.landing }))
+          return "Landing page generata con successo! Puoi scaricarla o copiarla."
+        }
+        return result.reply || result.error || "Errore nella generazione"
+      }
+
+      if (actionName === "create_video_ads") {
+        addMessage({ role: "system", content: "Generazione script video ads...", time: formatTime() })
+        const result = await callEdgeFunction("create", {
+          ...merged,
+          tipo: "VIDEO_ADS",
+          videoStile: merged.videoStile || "UGC",
+          videoDuration: merged.videoDuration || "30s",
+        })
+        if (result.landing || result.reply) {
+          const content = result.landing || result.reply
+          setGeneratedContent((prev: any) => ({ ...prev, videoAds: content }))
+          return typeof content === "string" ? content : "Script video ads generati!"
+        }
+        return result.error || "Errore nella generazione"
+      }
+
+      if (actionName === "create_retargeting") {
+        addMessage({ role: "system", content: "Generazione copy retargeting...", time: formatTime() })
+        const result = await callEdgeFunction("create", {
+          ...merged,
+          tipo: "RETARGETING",
+          retargAudience: merged.retargAudience || "ViewContent",
+          retargPiattaforma: merged.retargPiattaforma || "Facebook",
+        })
+        if (result.landing || result.reply) {
+          const content = result.landing || result.reply
+          setGeneratedContent((prev: any) => ({ ...prev, retargeting: content }))
+          return typeof content === "string" ? content : "Copy retargeting generato!"
+        }
+        return result.error || "Errore nella generazione"
+      }
+
+      if (actionName === "create_funnel") {
+        addMessage({ role: "system", content: "Generazione funnel completo (landing + video + retargeting)...", time: formatTime() })
+
+        const landingResult = await callEdgeFunction("create", {
+          ...merged, categoria: merged.categoria || "GADGET", pageType: merged.pageType || "LANDING",
+          copywritingFramework: merged.copywritingFramework || "AIDA", lingua: merged.lingua || "Italiano",
+        })
+        if (landingResult.landing) setGeneratedContent((prev: any) => ({ ...prev, landing: landingResult.landing }))
+        addMessage({ role: "system", content: "Landing generata. Generazione video ads...", time: formatTime() })
+
+        const videoResult = await callEdgeFunction("create", {
+          ...merged, tipo: "VIDEO_ADS", videoStile: merged.videoStile || "UGC", videoDuration: merged.videoDuration || "30s",
+        })
+        if (videoResult.landing || videoResult.reply) setGeneratedContent((prev: any) => ({ ...prev, videoAds: videoResult.landing || videoResult.reply }))
+        addMessage({ role: "system", content: "Video ads generati. Generazione retargeting...", time: formatTime() })
+
+        const retargResult = await callEdgeFunction("create", {
+          ...merged, tipo: "RETARGETING", retargAudience: merged.retargAudience || "ViewContent", retargPiattaforma: merged.retargPiattaforma || "Facebook",
+        })
+        if (retargResult.landing || retargResult.reply) setGeneratedContent((prev: any) => ({ ...prev, retargeting: retargResult.landing || retargResult.reply }))
+
+        return "Funnel completo generato! Landing page + Video Ads + Retargeting pronti."
+      }
+
+      if (actionName === "clone_landing") {
+        addMessage({ role: "system", content: `Clonazione landing da ${data.url}...`, time: formatTime() })
+        const result = await callEdgeFunction("clone", { url: data.url, lingua: data.lingua || "Italiano" })
+        if (result.landing) {
+          setGeneratedContent((prev: any) => ({ ...prev, landing: result.landing }))
+          return "Landing clonata con successo!"
+        }
+        return result.reply || result.error || "Errore nella clonazione"
+      }
+
+      if (actionName === "translate_landing") {
+        if (!generatedContent.landing) return "Nessuna landing da tradurre. Creane una prima."
+        addMessage({ role: "system", content: `Traduzione landing in ${data.lingua}...`, time: formatTime() })
+        const result = await callEdgeFunction("translate", {
+          landing: generatedContent.landing,
+          lingua: data.lingua || "English",
+        })
+        if (result.landing) {
+          setGeneratedContent((prev: any) => ({ ...prev, [`landing_${data.lingua}`]: result.landing }))
+          return `Landing tradotta in ${data.lingua}!`
+        }
+        return result.reply || result.error || "Errore nella traduzione"
+      }
+
+      return "Azione non riconosciuta"
+    } catch (e: any) {
+      return `Errore: ${e.message || "Errore nella generazione"}`
+    }
+  }
+
   const sendToAI = async (text: string) => {
     if (isProcessing || !agentSession) return
     setIsProcessing(true)
@@ -172,7 +340,12 @@ export default function AgentPage() {
     setChatHistory(newHistory)
 
     const ctx = await refreshContext()
-    const agentRole = AGENT_ROLE_TEMPLATE.replace("{CONTEXT}", JSON.stringify(ctx || toolContext || {}, null, 1))
+    const contextWithProduct = {
+      ...(ctx || toolContext || {}),
+      productData: Object.keys(productData).length > 0 ? productData : null,
+      generatedContent: Object.keys(generatedContent).length > 0 ? Object.keys(generatedContent) : null,
+    }
+    const agentRole = AGENT_ROLE_TEMPLATE.replace("{CONTEXT}", JSON.stringify(contextWithProduct, null, 1))
 
     try {
       let session = agentSession
@@ -196,9 +369,12 @@ export default function AgentPage() {
             history: newHistory.slice(-20),
             agentRole,
             toolState: {
-              hasProduct: false,
-              agentPhase: "FREE_CHAT",
+              hasProduct: Object.keys(productData).length > 0 && !!productData.nome,
+              agentPhase: Object.keys(productData).length > 0 ? "PRODUCT_LOADED" : "FREE_CHAT",
               wpSitesConfigured: 0,
+              hasLanding: !!generatedContent.landing,
+              hasVideoAds: !!generatedContent.videoAds,
+              hasRetargeting: !!generatedContent.retargeting,
             },
           },
         }),
@@ -218,15 +394,26 @@ export default function AgentPage() {
       const shouldExecute = result.autoExecute === true || (result.confidence || 0) >= 0.95
       const actionName = result.suggestedAction
       const extractedData = result.extractedData || {}
-      const executableActions = [
+      const adsActions = [
         "pause_campaign", "activate_campaign", "pause_multiple", "activate_multiple",
         "update_budget", "sync_campaigns", "get_campaign_details",
       ]
+      const funnelActions = [
+        "create_landing", "create_video_ads", "create_retargeting",
+        "create_funnel", "clone_landing", "translate_landing",
+      ]
 
-      if (shouldExecute && actionName && executableActions.includes(actionName)) {
+      if (extractedData && Object.keys(extractedData).length > 0) {
+        setProductData((prev: any) => ({ ...prev, ...extractedData }))
+      }
+
+      if (shouldExecute && actionName && adsActions.includes(actionName)) {
         addMessage({ role: "system", content: `Esecuzione: ${actionName}...`, time: formatTime() })
         const actionResult = await executeAction(actionName, extractedData)
         addMessage({ role: "agent", content: actionResult, time: formatTime() })
+      } else if (shouldExecute && actionName && funnelActions.includes(actionName)) {
+        const funnelResult = await executeFunnelAction(actionName, extractedData)
+        addMessage({ role: "agent", content: funnelResult, time: formatTime() })
       } else if (actionName && (result.confidence || 0) >= 0.5) {
         const labels: Record<string, string> = {
           pause_campaign: `Pausa "${extractedData.campaignName || ""}"`,
@@ -236,9 +423,16 @@ export default function AgentPage() {
           update_budget: `Budget → €${extractedData.budget || "?"}`,
           sync_campaigns: "Sincronizza",
           get_campaign_details: "Dettagli Campagna",
+          create_landing: "Crea Landing Page",
+          create_video_ads: "Crea Video Ads",
+          create_retargeting: "Crea Retargeting",
+          create_funnel: "Crea Funnel Completo",
+          clone_landing: `Clona Landing da ${extractedData.url || "URL"}`,
+          translate_landing: `Traduci in ${extractedData.lingua || "..."}`,
         }
         const label = labels[actionName] || actionName
-        if (executableActions.includes(actionName)) {
+        const allActions = [...adsActions, ...funnelActions]
+        if (allActions.includes(actionName)) {
           setMessages(prev => {
             const last = prev[prev.length - 1]
             if (last?.role === "agent") {
@@ -263,11 +457,20 @@ export default function AgentPage() {
   }
 
   const handleQuickAction = async (value: string, params?: any) => {
-    const executableActions = ["pause_campaign", "activate_campaign", "pause_multiple", "activate_multiple", "update_budget", "sync_campaigns", "get_campaign_details"]
-    if (executableActions.includes(value) && params) {
+    const adsActions = ["pause_campaign", "activate_campaign", "pause_multiple", "activate_multiple", "update_budget", "sync_campaigns", "get_campaign_details"]
+    const funnelActions = ["create_landing", "create_video_ads", "create_retargeting", "create_funnel", "clone_landing", "translate_landing"]
+
+    if (adsActions.includes(value) && params) {
       setIsProcessing(true)
       addMessage({ role: "system", content: `Esecuzione: ${value}...`, time: formatTime() })
       const result = await executeAction(value, params)
+      addMessage({ role: "agent", content: result, time: formatTime() })
+      setIsProcessing(false)
+      return
+    }
+    if (funnelActions.includes(value) && params) {
+      setIsProcessing(true)
+      const result = await executeFunnelAction(value, params)
       addMessage({ role: "agent", content: result, time: formatTime() })
       setIsProcessing(false)
       return
@@ -277,6 +480,35 @@ export default function AgentPage() {
       addMessage({ role: "user", content: prompt, time: formatTime() })
       sendToAI(prompt)
     }
+  }
+
+  const copyToClipboard = (content: any) => {
+    const text = typeof content === "string" ? content : JSON.stringify(content, null, 2)
+    navigator.clipboard.writeText(text)
+    addMessage({ role: "system", content: "Copiato negli appunti!", time: formatTime() })
+  }
+
+  const downloadContent = (content: any, filename: string) => {
+    const text = typeof content === "string" ? content : JSON.stringify(content, null, 2)
+    const blob = new Blob([text], { type: "application/json" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+    addMessage({ role: "system", content: `Scaricato: ${filename}`, time: formatTime() })
+  }
+
+  const previewLanding = (content: any) => {
+    let html = ""
+    if (typeof content === "string") {
+      html = content
+    } else {
+      html = `<html><head><style>body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px}</style></head><body><h1>Landing Preview</h1><pre>${JSON.stringify(content, null, 2)}</pre></body></html>`
+    }
+    const w = window.open("", "_blank")
+    if (w) { w.document.write(html); w.document.close() }
   }
 
   if (checkingAuth) {
@@ -316,7 +548,7 @@ export default function AgentPage() {
           <p className="text-xs text-green-400">Online — Accesso completo al tool</p>
         </div>
         <Button variant="ghost" size="icon" className="text-gray-400 hover:text-white hover:bg-white/10"
-          onClick={() => { setMessages([{ role: "agent", content: "Conversazione resettata. Come posso aiutarti?", time: formatTime() }]); setChatHistory([]) }}>
+          onClick={() => { setMessages([{ role: "agent", content: "Conversazione resettata. Come posso aiutarti?", time: formatTime() }]); setChatHistory([]); setProductData({}); setGeneratedContent({}) }}>
           <RefreshCw size={16} />
         </Button>
       </div>
@@ -359,6 +591,43 @@ export default function AgentPage() {
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      {Object.keys(generatedContent).length > 0 && (
+        <div className="px-4 py-2 bg-[#0e1621]/80 border-t border-white/[0.05]">
+          <p className="text-[11px] text-gray-500 mb-1.5 uppercase tracking-wider">Contenuti Generati</p>
+          <div className="flex flex-wrap gap-2">
+            {generatedContent.landing && (
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-green-400 mr-1">Landing</span>
+                <button onClick={() => copyToClipboard(generatedContent.landing)} className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white" title="Copia"><Copy size={12} /></button>
+                <button onClick={() => downloadContent(generatedContent.landing, "landing.json")} className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white" title="Scarica"><Download size={12} /></button>
+                <button onClick={() => previewLanding(generatedContent.landing)} className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white" title="Anteprima"><Eye size={12} /></button>
+              </div>
+            )}
+            {generatedContent.videoAds && (
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-blue-400 mr-1">Video Ads</span>
+                <button onClick={() => copyToClipboard(generatedContent.videoAds)} className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white" title="Copia"><Copy size={12} /></button>
+                <button onClick={() => downloadContent(generatedContent.videoAds, "video-ads.json")} className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white" title="Scarica"><Download size={12} /></button>
+              </div>
+            )}
+            {generatedContent.retargeting && (
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-purple-400 mr-1">Retargeting</span>
+                <button onClick={() => copyToClipboard(generatedContent.retargeting)} className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white" title="Copia"><Copy size={12} /></button>
+                <button onClick={() => downloadContent(generatedContent.retargeting, "retargeting.json")} className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white" title="Scarica"><Download size={12} /></button>
+              </div>
+            )}
+            {Object.keys(generatedContent).filter(k => k.startsWith("landing_")).map(k => (
+              <div key={k} className="flex items-center gap-1">
+                <span className="text-xs text-yellow-400 mr-1">Landing ({k.replace("landing_", "")})</span>
+                <button onClick={() => copyToClipboard(generatedContent[k])} className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white" title="Copia"><Copy size={12} /></button>
+                <button onClick={() => downloadContent(generatedContent[k], `${k}.json`)} className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white" title="Scarica"><Download size={12} /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="px-4 py-3 bg-[#0e1621] border-t border-white/[0.08]">
         <div className="flex items-end gap-2 bg-[#242f3d] rounded-xl px-3 py-2">
