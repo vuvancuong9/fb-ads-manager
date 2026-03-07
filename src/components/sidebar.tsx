@@ -17,6 +17,7 @@ import {
   Eye,
   FileText,
   ArrowRightLeft,
+  Bot,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/lib/store"
@@ -37,6 +38,7 @@ const mainLinks = [
   { href: "/dashboard/pixels", label: "Pixel", icon: Eye },
   { href: "/dashboard/pages", label: "Pagine", icon: FileText },
   { href: "/dashboard/traffic-manager", label: "Traffic Manager", icon: ArrowRightLeft },
+  { href: "/dashboard/agent", label: "AI Assistant", icon: Bot },
 ]
 
 export function Sidebar() {
