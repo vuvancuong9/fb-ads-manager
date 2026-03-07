@@ -13,7 +13,12 @@ interface ChatMessage {
   role: "user" | "agent" | "system"
   content: string
   time: string
-  actions?: { label: string; value: string }[]
+  actions?: { label: string; value: string; params?: any }[]
+}
+
+interface PendingAction {
+  action: string
+  params: any
 }
 
 const QUICK_ACTIONS = [
@@ -67,6 +72,7 @@ export default function AgentPage() {
   const [agentLoggedIn, setAgentLoggedIn] = useState(false)
   const [checkingAuth, setCheckingAuth] = useState(true)
   const [chatHistory, setChatHistory] = useState<{ role: string; content: string }[]>([])
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -114,6 +120,20 @@ export default function AgentPage() {
     setMessages(prev => [...prev, msg])
   }, [])
 
+  const executeAction = async (action: string, params: any): Promise<string> => {
+    try {
+      const res = await fetch("/api/agent/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, params }),
+      })
+      const result = await res.json()
+      return result.message || result.error || "Azione completata"
+    } catch {
+      return "Errore nell'esecuzione dell'azione"
+    }
+  }
+
   const sendToAI = async (text: string) => {
     if (isProcessing) return
     setIsProcessing(true)
@@ -129,6 +149,7 @@ export default function AgentPage() {
           message: text,
           history: newHistory.slice(-20),
           agentSessionToken: agentSession,
+          pendingAction: pendingAction,
         }),
       })
 
@@ -143,15 +164,37 @@ export default function AgentPage() {
       const reply = result.reply || result.error || "Non ho capito, puoi ripetere?"
       setChatHistory(prev => [...prev, { role: "assistant", content: reply }])
 
-      const actions: { label: string; value: string }[] = []
-      if (result.suggestedAction) {
+      addMessage({ role: "agent", content: reply, time: formatTime() })
+
+      const shouldExecute = result.autoExecute === true || (result.confidence || 0) >= 0.95
+      const actionToExecute = result.suggestedAction
+      const extractedData = result.extractedData || {}
+
+      if (shouldExecute && actionToExecute) {
+        const executableActions = [
+          "pause_campaign", "activate_campaign", "pause_multiple", "activate_multiple",
+          "update_budget", "sync_campaigns", "get_campaign_details",
+        ]
+
+        if (executableActions.includes(actionToExecute)) {
+          addMessage({ role: "system", content: `Esecuzione: ${actionToExecute}...`, time: formatTime() })
+          const actionResult = await executeAction(actionToExecute, extractedData)
+          addMessage({ role: "agent", content: actionResult, time: formatTime() })
+          setPendingAction(null)
+        }
+      } else if (actionToExecute && (result.confidence || 0) >= 0.5) {
+        setPendingAction({ action: actionToExecute, params: extractedData })
+
         const actionLabels: Record<string, string> = {
           sync_campaigns: "Sincronizza Campagne",
-          pause_campaign: "Pausa Campagna",
-          activate_campaign: "Attiva Campagna",
+          pause_campaign: `Pausa "${extractedData.campaignName || "campagna"}"`,
+          activate_campaign: `Attiva "${extractedData.campaignName || "campagna"}"`,
+          pause_multiple: `Pausa ${(extractedData.campaignNames || []).length} campagne`,
+          activate_multiple: `Attiva ${(extractedData.campaignNames || []).length} campagne`,
+          update_budget: `Cambia budget a €${extractedData.budget || "?"}`,
+          get_campaign_details: "Dettagli Campagna",
           show_losing: "Mostra in Perdita",
           show_profitable: "Mostra Profittevoli",
-          analyze_account: "Analizza Account",
           optimize_budget: "Ottimizza Budget",
           check_approval: "Controlla Approval",
           show_report: "Genera Report",
@@ -161,13 +204,18 @@ export default function AgentPage() {
           create_funnel: "Crea Funnel",
           search_offers: "Cerca Offerte",
         }
-        const label = actionLabels[result.suggestedAction] || result.suggestedAction
-        if ((result.confidence || 0) >= 0.5) {
-          actions.push({ label, value: result.suggestedAction })
-        }
-      }
 
-      addMessage({ role: "agent", content: reply, time: formatTime(), actions })
+        const label = actionLabels[actionToExecute] || actionToExecute
+        setMessages(prev => {
+          const last = prev[prev.length - 1]
+          if (last?.role === "agent") {
+            return [...prev.slice(0, -1), { ...last, actions: [{ label, value: actionToExecute, params: extractedData }] }]
+          }
+          return prev
+        })
+      } else {
+        setPendingAction(null)
+      }
     } catch {
       addMessage({ role: "agent", content: "Errore di connessione. Riprova.", time: formatTime() })
     }
@@ -183,7 +231,22 @@ export default function AgentPage() {
     sendToAI(text)
   }
 
-  const handleQuickAction = (value: string) => {
+  const handleQuickAction = async (value: string, params?: any) => {
+    const executableActions = [
+      "pause_campaign", "activate_campaign", "pause_multiple", "activate_multiple",
+      "update_budget", "sync_campaigns", "get_campaign_details",
+    ]
+
+    if (executableActions.includes(value) && params) {
+      setIsProcessing(true)
+      addMessage({ role: "system", content: `Esecuzione: ${value}...`, time: formatTime() })
+      const result = await executeAction(value, params)
+      addMessage({ role: "agent", content: result, time: formatTime() })
+      setPendingAction(null)
+      setIsProcessing(false)
+      return
+    }
+
     const prompt = ACTION_PROMPTS[value]
     if (prompt) {
       addMessage({ role: "user", content: prompt, time: formatTime() })
@@ -311,10 +374,10 @@ export default function AgentPage() {
                 {msg.actions.map((action, j) => (
                   <button
                     key={j}
-                    onClick={() => handleQuickAction(action.value)}
-                    className="px-3 py-1.5 rounded-full text-xs font-medium bg-purple-500/15 border border-purple-500/30 text-purple-300 hover:bg-purple-500/30 hover:border-purple-500 transition-all hover:-translate-y-0.5"
+                    onClick={() => handleQuickAction(action.value, action.params)}
+                    className="px-3 py-1.5 rounded-full text-xs font-medium bg-green-500/15 border border-green-500/30 text-green-300 hover:bg-green-500/30 hover:border-green-500 transition-all hover:-translate-y-0.5"
                   >
-                    {action.label}
+                    Esegui: {action.label}
                   </button>
                 ))}
               </div>
