@@ -601,8 +601,8 @@ export default function TrafficManagerPage() {
                                   <td className="py-2 px-4 text-right text-red-600">{formatNumber(d.rejected_conversions)}</td>
                                   <td className="py-2 px-4 text-right text-yellow-600">{formatNumber(d.pending_conversions)}</td>
                                   <td className="py-2 px-4 text-right">
-                                    <Badge className={d.approval_rate >= 70 ? "bg-green-100 text-green-700" : d.approval_rate >= 40 ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}>
-                                      {d.approval_rate.toFixed(1)}%
+                                    <Badge className={(d.approval_rate ?? 0) >= 70 ? "bg-green-100 text-green-700" : (d.approval_rate ?? 0) >= 40 ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}>
+                                      {(d.approval_rate ?? 0).toFixed(1)}%
                                     </Badge>
                                   </td>
                                   <td className="py-2 px-4 text-right">{formatCurrency(Number(d.revenue))}</td>
