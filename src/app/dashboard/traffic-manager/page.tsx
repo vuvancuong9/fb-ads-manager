@@ -286,112 +286,56 @@ export default function TrafficManagerPage() {
       {showForm && (
         <Card>
           <CardHeader>
-            <CardTitle>{form.id ? "Modifica" : "Nuova"} Connessione</CardTitle>
+            <CardTitle>{form.id ? "Modifica" : "Collega"} Traffic Manager</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">Preset</label>
-                <Select value={form.preset} onValueChange={applyPreset}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="custom">Personalizzato</SelectItem>
-                    <SelectItem value="keitaro">Keitaro</SelectItem>
-                    <SelectItem value="binom">Binom</SelectItem>
-                    <SelectItem value="voluum">Voluum</SelectItem>
-                    <SelectItem value="redtrack">RedTrack</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">Nome</label>
-                <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Es. Keitaro Principale" />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">Tipo Autenticazione</label>
-                <Select value={form.auth_type} onValueChange={v => setForm({ ...form, auth_type: v as any })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="bearer">Bearer Token</SelectItem>
-                    <SelectItem value="api_key">API Key (Header)</SelectItem>
-                    <SelectItem value="query_param">API Key (Query Param)</SelectItem>
-                    <SelectItem value="basic">Basic Auth</SelectItem>
-                  </SelectContent>
-                </Select>
+          <CardContent className="space-y-5">
+            <div>
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">Piattaforma</label>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                {[
+                  { value: "keitaro", label: "Keitaro" },
+                  { value: "binom", label: "Binom" },
+                  { value: "voluum", label: "Voluum" },
+                  { value: "redtrack", label: "RedTrack" },
+                  { value: "custom", label: "Altro" },
+                ].map(({ value, label }) => (
+                  <button
+                    key={value}
+                    onClick={() => applyPreset(value)}
+                    className={`px-4 py-3 rounded-lg border-2 text-sm font-semibold transition-all ${form.preset === value ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" : "border-gray-200 dark:border-gray-700 hover:border-gray-300 text-gray-600 dark:text-gray-400"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">API Base URL</label>
-                <Input value={form.api_base_url} onChange={e => setForm({ ...form, api_base_url: e.target.value })} placeholder="https://tracker.example.com" />
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">Nome</label>
+                <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Es. Il mio Keitaro" />
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">Endpoint Path</label>
-                <Input value={form.endpoint_path} onChange={e => setForm({ ...form, endpoint_path: e.target.value })} placeholder="/api/conversions" />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">API Key / Token</label>
-                <Input type="password" value={form.api_key} onChange={e => setForm({ ...form, api_key: e.target.value })} placeholder="La tua API key" />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">API Secret (opzionale)</label>
-                <Input type="password" value={form.api_secret} onChange={e => setForm({ ...form, api_secret: e.target.value })} placeholder="Opzionale" />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">Nome Parametro Auth</label>
-                <Input value={form.auth_param_name} onChange={e => setForm({ ...form, auth_param_name: e.target.value })} placeholder="Authorization / Api-Key / api_key" />
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">URL del tracker</label>
+                <Input value={form.api_base_url} onChange={e => setForm({ ...form, api_base_url: e.target.value })} placeholder={form.preset === "voluum" ? "https://api.voluum.com" : form.preset === "redtrack" ? "https://api.redtrack.io" : "https://il-tuo-tracker.com"} />
+                <p className="text-xs text-gray-400 mt-1">{form.preset === "keitaro" ? "Es. https://il-tuo-dominio.com" : form.preset === "binom" ? "Es. https://il-tuo-binom.com" : "L'indirizzo del tuo tracker"}</p>
               </div>
             </div>
 
             <div>
-              <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">Parametri Extra (JSON)</label>
-              <Input
-                value={form.extra_params_text}
-                onChange={e => setForm({ ...form, extra_params_text: e.target.value })}
-                placeholder='{"date_from": "{dateFrom}", "date_to": "{dateTo}", "group_by": "day"}'
-              />
-              <p className="text-xs text-gray-400 mt-1">Usa {"{dateFrom}"} e {"{dateTo}"} come variabili per le date</p>
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">API Key</label>
+              <Input type="password" value={form.api_key} onChange={e => setForm({ ...form, api_key: e.target.value })} placeholder="Incolla qui la tua API key" />
+              <p className="text-xs text-gray-400 mt-1">
+                {form.preset === "keitaro" ? "La trovi in Keitaro → Impostazioni → API" : form.preset === "binom" ? "La trovi in Binom → Settings → API" : form.preset === "voluum" ? "La trovi in Voluum → Settings → Security → API access tokens" : form.preset === "redtrack" ? "La trovi in RedTrack → Tools → API" : "Controlla le impostazioni del tuo tracker"}
+              </p>
             </div>
 
-            <Card className="bg-gray-50 dark:bg-gray-800/50">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Mappatura Campi Risposta</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {[
-                    { key: "data_root", label: "Root dati", placeholder: "data" },
-                    { key: "total_field", label: "Campo Totale", placeholder: "total" },
-                    { key: "approved_field", label: "Campo Approvate", placeholder: "approved" },
-                    { key: "rejected_field", label: "Campo Rifiutate", placeholder: "rejected" },
-                    { key: "pending_field", label: "Campo In Attesa", placeholder: "pending" },
-                    { key: "revenue_field", label: "Campo Revenue", placeholder: "revenue" },
-                    { key: "date_field", label: "Campo Data", placeholder: "date" },
-                  ].map(({ key, label, placeholder }) => (
-                    <div key={key}>
-                      <label className="text-xs text-gray-500 mb-1 block">{label}</label>
-                      <Input
-                        className="h-8 text-sm"
-                        value={(form.response_mapping as any)[key] || ""}
-                        onChange={e => setForm({ ...form, response_mapping: { ...form.response_mapping, [key]: e.target.value } })}
-                        placeholder={placeholder}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            <div className="flex items-center gap-3">
-              <Button variant="outline" onClick={handleTest} disabled={testing || !form.api_base_url}>
+            <div className="flex items-center gap-3 pt-2">
+              <Button variant="outline" onClick={handleTest} disabled={testing || !form.api_base_url || !form.api_key}>
                 <TestTube size={16} />
                 {testing ? "Testing..." : "Testa Connessione"}
               </Button>
-              <Button onClick={handleSave} disabled={saving || !form.name || !form.api_base_url}>
+              <Button onClick={handleSave} disabled={saving || !form.name || !form.api_base_url || !form.api_key}>
                 <Save size={16} />
                 {saving ? "Salvataggio..." : "Salva"}
               </Button>
@@ -399,21 +343,11 @@ export default function TrafficManagerPage() {
             </div>
 
             {testResult && (
-              <Card className={testResult.ok ? "border-green-300 bg-green-50 dark:bg-green-900/20" : "border-red-300 bg-red-50 dark:bg-red-900/20"}>
-                <CardContent className="p-4">
-                  <p className="font-medium mb-2">
-                    {testResult.ok ? "Connessione riuscita" : testResult.error || `Errore ${testResult.status}`}
-                  </p>
-                  {testResult.data && (
-                    <pre className="text-xs bg-white dark:bg-gray-900 p-3 rounded overflow-auto max-h-48">
-                      {JSON.stringify(testResult.data, null, 2)}
-                    </pre>
-                  )}
-                  {testResult.raw && (
-                    <pre className="text-xs bg-white dark:bg-gray-900 p-3 rounded overflow-auto max-h-48">{testResult.raw}</pre>
-                  )}
-                </CardContent>
-              </Card>
+              <div className={`rounded-lg p-4 ${testResult.ok ? "bg-green-50 border border-green-200 dark:bg-green-900/20 dark:border-green-800" : "bg-red-50 border border-red-200 dark:bg-red-900/20 dark:border-red-800"}`}>
+                <p className={`font-medium flex items-center gap-2 ${testResult.ok ? "text-green-700 dark:text-green-300" : "text-red-700 dark:text-red-300"}`}>
+                  {testResult.ok ? <><CheckCircle2 size={16} /> Connessione riuscita!</> : <><XCircle size={16} /> {testResult.error || `Errore ${testResult.status}`}</>}
+                </p>
+              </div>
             )}
           </CardContent>
         </Card>
