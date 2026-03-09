@@ -166,9 +166,11 @@ export async function POST(request: NextRequest) {
           ? (approved / totalLeads) * 100
           : safeNum(records[0]?.leads?.confirmed?.percent ?? records[0]?.conversions?.approved?.percent)
 
-        const upsertData = {
+        await serviceClient.from("traffic_manager_data").delete().eq("traffic_manager_id", manager.id)
+
+        const { error: upsertError } = await serviceClient.from("traffic_manager_data").insert({
           traffic_manager_id: manager.id,
-          date: dateFrom,
+          date: dateTo,
           total_conversions: totalLeads,
           approved_conversions: approved,
           rejected_conversions: totalCanceled,
@@ -176,20 +178,11 @@ export async function POST(request: NextRequest) {
           approval_rate: Math.round(approvalRate * 100) / 100,
           revenue: totalRevenue,
           raw_data: apiData,
-        }
+        })
 
-        const { error: upsertError } = await serviceClient.from("traffic_manager_data").upsert(
-          upsertData, { onConflict: "traffic_manager_id,date" }
-        )
-
-        if (!upsertError && dateFrom !== dateTo) {
-          await serviceClient.from("traffic_manager_data").upsert({
-            ...upsertData,
-            date: dateTo,
-          }, { onConflict: "traffic_manager_id,date" })
-        }
-
-        await serviceClient.from("traffic_managers").update({ last_synced_at: new Date().toISOString() }).eq("id", manager.id)
+        await serviceClient.from("traffic_managers").update({
+          last_synced_at: new Date().toISOString(),
+        }).eq("id", manager.id)
 
         return NextResponse.json({
           success: true,

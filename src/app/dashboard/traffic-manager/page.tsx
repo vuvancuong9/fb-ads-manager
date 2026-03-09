@@ -224,7 +224,6 @@ export default function TrafficManagerPage() {
 
   const filteredData = tmData.filter(d => {
     if (selectedManager !== "all" && d.traffic_manager_id !== selectedManager) return false
-    if (d.date < dateFrom || d.date > dateTo) return false
     return true
   }).sort((a, b) => a.date.localeCompare(b.date))
 
