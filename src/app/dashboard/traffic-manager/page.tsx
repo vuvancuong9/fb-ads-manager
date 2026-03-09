@@ -85,6 +85,23 @@ export default function TrafficManagerPage() {
 
   useEffect(() => { load() }, [load])
 
+  const [autoSynced, setAutoSynced] = useState("")
+  useEffect(() => {
+    const key = `${dateFrom}_${dateTo}`
+    if (managers.length > 0 && autoSynced !== key && !syncing) {
+      setAutoSynced(key)
+      syncAll(dateFrom, dateTo)
+    }
+  }, [dateFrom, dateTo, managers, autoSynced, syncing, syncAll])
+
+  useEffect(() => {
+    if (managers.length === 0) return
+    const interval = setInterval(() => {
+      syncAll()
+    }, 60 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [managers, syncAll])
+
   const resetForm = () => {
     setForm({
       id: "", name: "", preset: "custom", api_base_url: "", api_key: "", api_secret: "",
@@ -184,18 +201,19 @@ export default function TrafficManagerPage() {
     await load()
   }
 
-  const handleFetch = async (id: string) => {
+  const handleFetch = async (id: string, from?: string, to?: string) => {
     setSyncing(id)
     setSyncResult(null)
     try {
       const res = await fetch("/api/traffic-manager", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "fetch", id, dateFrom, dateTo }),
+        body: JSON.stringify({ action: "fetch", id, dateFrom: from || dateFrom, dateTo: to || dateTo }),
       })
       const json = await res.json()
       if (json.error) {
-        alert(json.error)
+        // silent on auto-sync
+        if (!from) alert(json.error)
       } else {
         setSyncResult(json)
         await load()
@@ -203,6 +221,24 @@ export default function TrafficManagerPage() {
     } catch { /* ignore */ }
     setSyncing(null)
   }
+
+  const syncAll = useCallback(async (from?: string, to?: string) => {
+    if (managers.length === 0) return
+    setSyncing("all")
+    for (const m of managers) {
+      try {
+        const res = await fetch("/api/traffic-manager", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "fetch", id: m.id, dateFrom: from || dateFrom, dateTo: to || dateTo }),
+        })
+        const json = await res.json()
+        if (!json.error) setSyncResult(json)
+      } catch { /* ignore */ }
+    }
+    await load()
+    setSyncing(null)
+  }, [managers, dateFrom, dateTo, load])
 
   const editManager = (m: TrafficManager) => {
     setForm({
