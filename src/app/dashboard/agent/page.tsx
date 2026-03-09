@@ -8,6 +8,7 @@ import { Send, Bot, RefreshCw, Zap, TrendingDown, TrendingUp, BarChart3, Search,
 
 const AGENT_URL = "https://smwtkyvnmyetlektphyy.supabase.co"
 const AGENT_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNtd3RreXZubXlldGxla3RwaHl5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMzk1MzEsImV4cCI6MjA3NTYxNTUzMX0.9YhnYyA7n9qXMgIOvh64Z9-ylYADrW7x2SysbAGvVp0"
+const USE_LOCAL_AI = true
 
 interface ChatMessage {
   role: "user" | "agent" | "system"
@@ -422,55 +423,24 @@ export default function AgentPage() {
   }
 
   const sendToAI = async (text: string) => {
-    if (isProcessing || !agentSession) return
+    if (isProcessing) return
     setIsProcessing(true)
 
     const newHistory = [...chatHistory, { role: "user", content: text }]
     setChatHistory(newHistory)
 
-    const ctx = await refreshContext()
-    const contextWithProduct = {
-      ...(ctx || toolContext || {}),
-      productData: Object.keys(productData).length > 0 ? productData : null,
-      generatedContent: Object.keys(generatedContent).length > 0 ? Object.keys(generatedContent) : null,
-    }
-    const agentRole = AGENT_ROLE_TEMPLATE.replace("{CONTEXT}", JSON.stringify(contextWithProduct, null, 1))
-
     try {
-      let session = agentSession
-      if (session.expires_at && session.expires_at * 1000 < Date.now() + 60000) {
-        const { data } = await agentSupabase.current.auth.refreshSession()
-        if (data?.session) { session = data.session; setAgentSession(session) }
-      }
-
-      const res = await fetch(`${AGENT_URL}/functions/v1/funnel-builder-claude-v2`, {
+      const res = await fetch("/api/agent/chat", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "apikey": AGENT_KEY,
-          "Authorization": `Bearer ${session.access_token}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "chat",
-          userId: agentUser?.id,
-          data: {
-            message: text,
-            history: newHistory.slice(-20),
-            agentRole,
-            toolState: {
-              hasProduct: Object.keys(productData).length > 0 && !!productData.nome,
-              agentPhase: Object.keys(productData).length > 0 ? "PRODUCT_LOADED" : "FREE_CHAT",
-              wpSitesConfigured: 0,
-              hasLanding: !!generatedContent.landing,
-              hasVideoAds: !!generatedContent.videoAds,
-              hasRetargeting: !!generatedContent.retargeting,
-            },
-          },
+          message: text,
+          history: newHistory.slice(-20),
         }),
       })
 
       if (!res.ok) {
-        addMessage({ role: "agent", content: `Errore AI: ${res.status}. Riprova.`, time: formatTime() })
+        addMessage({ role: "agent", content: `Errore AI: ${res.status}. Controlla le API key nelle Impostazioni.`, time: formatTime() })
         setIsProcessing(false)
         return
       }
@@ -599,32 +569,6 @@ export default function AgentPage() {
     }
     const w = window.open("", "_blank")
     if (w) { w.document.write(html); w.document.close() }
-  }
-
-  if (checkingAuth) {
-    return <div className="flex h-[calc(100vh-4rem)] items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-4 border-purple-600 border-t-transparent" /></div>
-  }
-
-  if (!agentLoggedIn) {
-    return (
-      <div className="flex h-[calc(100vh-4rem)] items-center justify-center">
-        <div className="w-full max-w-md bg-[#0e1621] rounded-2xl p-8 shadow-2xl border border-white/10">
-          <div className="text-center mb-6">
-            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center mx-auto mb-4">
-              <Bot size={32} className="text-white" />
-            </div>
-            <h2 className="text-xl font-bold text-white">Agent Hub Login</h2>
-            <p className="text-sm text-gray-400 mt-1">Accedi con le credenziali Agent Hub</p>
-          </div>
-          <div className="space-y-4">
-            <Input type="email" placeholder="Email" value={agentLoginEmail} onChange={e => setAgentLoginEmail(e.target.value)} className="bg-[#242f3d] border-white/10 text-white placeholder:text-gray-500" onKeyDown={e => e.key === "Enter" && handleAgentLogin()} />
-            <Input type="password" placeholder="Password" value={agentLoginPassword} onChange={e => setAgentLoginPassword(e.target.value)} className="bg-[#242f3d] border-white/10 text-white placeholder:text-gray-500" onKeyDown={e => e.key === "Enter" && handleAgentLogin()} />
-            {agentLoginError && <p className="text-red-400 text-sm">{agentLoginError}</p>}
-            <Button onClick={handleAgentLogin} className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700">Accedi</Button>
-          </div>
-        </div>
-      </div>
-    )
   }
 
   return (

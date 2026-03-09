@@ -39,6 +39,7 @@ const mainLinks = [
   { href: "/dashboard/pages", label: "Pagine", icon: FileText },
   { href: "/dashboard/traffic-manager", label: "Traffic Manager", icon: ArrowRightLeft },
   { href: "/dashboard/agent", label: "AI Assistant", icon: Bot },
+  { href: "/dashboard/settings", label: "Impostazioni", icon: Settings },
 ]
 
 export function Sidebar() {
