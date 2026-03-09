@@ -35,7 +35,7 @@ IMPORTANTE — DISTINZIONE TRA CAMPAGNE E OFFERTE:
 - "Offerte" / "Offers" = offerte del network/Offersify (campo "offerteCatalogoNetwork" e "offerteNetwork" nei dati)
 - Quando l'utente chiede "offerte" intende SEMPRE le offerte del network, MAI le campagne Facebook
 - "offerteNetwork" = dati approval rate per offerta (confermate, cancellate, payout, ecc.)
-- "offerteCatalogoNetwork" = catalogo offerte disponibili (nome, paese, payout, verticale, stato)
+- Per vedere il catalogo offerte disponibili, USA l'azione "search_offers" — non le hai nel contesto, devi eseguire l'azione per recuperarle
 
 **Funnel Builder:**
 - "create_landing" — Genera landing page (extractedData = dati prodotto)
@@ -213,37 +213,6 @@ async function getToolContext(serviceClient: any, userId: string, isAdmin: boole
       }
     }
 
-    // Fetch live offers from each TM API
-    const liveOffers: any[] = []
-    for (const m of tmManagers) {
-      if (!m.api_base_url || !m.api_key) continue
-      try {
-        const base = (m.api_base_url || "").replace(/\/$/, "")
-        const offersUrl = `${base}/offers`
-        const headers: Record<string, string> = { "Accept": "application/json" }
-        if (m.api_key) headers["x-api-key"] = m.api_key
-        if (m.api_secret) headers["x-user-id"] = m.api_secret
-        const res = await fetch(offersUrl, { headers })
-        if (res.ok) {
-          const data = await res.json()
-          const offers = Array.isArray(data) ? data : data?.data || data?.offers || []
-          for (const o of offers) {
-            liveOffers.push({
-              tmName: m.name,
-              id: o.id || o.offer_id,
-              nome: o.name || o.offer_name,
-              stato: o.status === "active" || o.status === "1" || o.active ? "attiva" : o.status || "sconosciuto",
-              paese: o.country || o.geo || o.countries,
-              payout: o.payout,
-              verticale: o.vertical || o.category,
-            })
-          }
-        }
-      } catch { /* skip */ }
-    }
-    if (liveOffers.length > 0) {
-      ctx.offerteCatalogoNetwork = liveOffers
-    }
   }
 
   ctx.dataOggi = today
