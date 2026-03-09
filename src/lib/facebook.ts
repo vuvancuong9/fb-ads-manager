@@ -216,25 +216,44 @@ export async function createAdSet(
   })
 }
 
-export function parseActions(actions: Array<{ action_type: string; value: string }> | null | undefined) {
-  if (!actions) return { conversions: 0, linkClicks: 0 }
+const OBJECTIVE_TO_ACTION: Record<string, string> = {
+  'OUTCOME_LEADS': 'offsite_conversion.fb_pixel_lead',
+  'LEAD_GENERATION': 'offsite_conversion.fb_pixel_lead',
+  'OUTCOME_SALES': 'offsite_conversion.fb_pixel_purchase',
+  'CONVERSIONS': 'offsite_conversion.fb_pixel_purchase',
+  'PRODUCT_CATALOG_SALES': 'offsite_conversion.fb_pixel_purchase',
+  'OUTCOME_APP_PROMOTION': 'app_install',
+  'APP_INSTALLS': 'app_install',
+  'OUTCOME_TRAFFIC': 'link_click',
+  'LINK_CLICKS': 'link_click',
+}
 
-  const resultActions = [
-    'offsite_conversion.fb_pixel_lead',
-    'offsite_conversion.fb_pixel_purchase',
-    'offsite_conversion.fb_pixel_complete_registration',
-    'offsite_conversion.fb_pixel_initiate_checkout',
-  ]
+export function parseActions(
+  actions: Array<{ action_type: string; value: string }> | null | undefined,
+  objective?: string
+) {
+  if (!actions) return { conversions: 0, linkClicks: 0 }
 
   let conversions = 0
   let linkClicks = 0
 
+  const targetAction = objective ? OBJECTIVE_TO_ACTION[objective] : null
+
   for (const action of actions) {
-    if (resultActions.includes(action.action_type)) {
+    if (targetAction && action.action_type === targetAction) {
       conversions += parseInt(action.value, 10)
     }
     if (action.action_type === 'link_click') {
       linkClicks += parseInt(action.value, 10)
+    }
+  }
+
+  if (!targetAction && conversions === 0) {
+    for (const action of actions) {
+      if (action.action_type === 'offsite_conversion.fb_pixel_lead' ||
+          action.action_type === 'offsite_conversion.fb_pixel_purchase') {
+        conversions += parseInt(action.value, 10)
+      }
     }
   }
 

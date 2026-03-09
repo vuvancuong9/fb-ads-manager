@@ -74,19 +74,22 @@ export async function POST(request: NextRequest) {
 
       const { data: dbCampaigns } = await serviceClient
         .from("campaigns")
-        .select("id,fb_campaign_id")
+        .select("id,fb_campaign_id,objective")
         .eq("fb_ad_account_id", account.id)
 
       const campaignMap: Record<string, string> = {}
+      const objectiveMap: Record<string, string> = {}
       for (const c of dbCampaigns || []) {
         campaignMap[c.fb_campaign_id] = c.id
+        objectiveMap[c.fb_campaign_id] = c.objective || ""
       }
 
       for (const insight of insightsRes.data || []) {
         const dbCampId = campaignMap[insight.campaign_id]
         if (!dbCampId) continue
 
-        const { conversions, linkClicks } = parseActions(insight.actions)
+        const objective = objectiveMap[insight.campaign_id]
+        const { conversions, linkClicks } = parseActions(insight.actions, objective)
         const { conversionValue } = parseActionValues(insight.action_values)
         const spend = parseFloat(insight.spend || "0")
         const impressions = parseInt(insight.impressions || "0")
