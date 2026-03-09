@@ -83,6 +83,24 @@ export default function TrafficManagerPage() {
     setLoading(false)
   }, [])
 
+  const syncAll = useCallback(async (from?: string, to?: string) => {
+    if (managers.length === 0) return
+    setSyncing("all")
+    for (const m of managers) {
+      try {
+        const res = await fetch("/api/traffic-manager", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "fetch", id: m.id, dateFrom: from || dateFrom, dateTo: to || dateTo }),
+        })
+        const json = await res.json()
+        if (!json.error) setSyncResult(json)
+      } catch { /* ignore */ }
+    }
+    await load()
+    setSyncing(null)
+  }, [managers, dateFrom, dateTo, load])
+
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
@@ -210,24 +228,6 @@ export default function TrafficManagerPage() {
     } catch { /* ignore */ }
     setSyncing(null)
   }
-
-  const syncAll = useCallback(async (from?: string, to?: string) => {
-    if (managers.length === 0) return
-    setSyncing("all")
-    for (const m of managers) {
-      try {
-        const res = await fetch("/api/traffic-manager", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "fetch", id: m.id, dateFrom: from || dateFrom, dateTo: to || dateTo }),
-        })
-        const json = await res.json()
-        if (!json.error) setSyncResult(json)
-      } catch { /* ignore */ }
-    }
-    await load()
-    setSyncing(null)
-  }, [managers, dateFrom, dateTo, load])
 
   const editManager = (m: TrafficManager) => {
     setForm({

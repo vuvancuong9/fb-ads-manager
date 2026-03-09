@@ -139,7 +139,6 @@ export async function POST(request: NextRequest) {
           const l = r.leads || {}
           const c = r.conversions || {}
 
-          const leads = safeNum(l.total_leads ?? l.total_with_trash ?? r.total_leads ?? r.total)
           const confirmed = safeNum(l.confirmed?.total ?? r.confirmed?.total)
           const canceled = safeNum(l.canceled?.total ?? r.canceled?.total)
           const pendingConv = safeNum(c.pending?.total ?? l.to_call_back?.total ?? r.to_call_back?.total)
