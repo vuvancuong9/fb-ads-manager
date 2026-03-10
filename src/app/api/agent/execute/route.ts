@@ -93,56 +93,44 @@ export async function POST(request: NextRequest) {
       if (!token) return NextResponse.json({ success: false, message: "Token mancante" })
 
       const budgetCents = Math.round(Number(newBudget) * 100)
+      const fbCampaignId = campaign.fb_campaign_id
 
-      const fbRes = await fetch(`https://graph.facebook.com/v21.0/${campaign.fb_campaign_id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ daily_budget: budgetCents, access_token: token }),
-      })
-
-      if (fbRes.ok) {
-        await serviceClient.from("campaigns").update({ daily_budget: budgetCents }).eq("id", campaign.id)
-        return NextResponse.json({ success: true, message: `Budget campagna (CBO) "${campaign.name}" aggiornato a €${newBudget}/giorno` })
-      }
-
-      const campaignErr = await fbRes.json().catch(() => ({}))
-      const errMsg = campaignErr?.error?.message || ""
-
-      const adsetsRes = await fetch(
-        `https://graph.facebook.com/v21.0/${campaign.fb_campaign_id}/adsets?fields=id,name,status,daily_budget&access_token=${token}`
+      const beforeRes = await fetch(
+        `https://graph.facebook.com/v21.0/${fbCampaignId}?fields=daily_budget,lifetime_budget,name,budget_rebalance_flag&access_token=${encodeURIComponent(token)}`
       )
-      if (!adsetsRes.ok) {
-        return NextResponse.json({ success: false, message: errMsg || "Errore aggiornamento budget" })
-      }
+      const beforeData = await beforeRes.json().catch(() => null)
+      const budgetBefore = beforeData?.daily_budget ? Number(beforeData.daily_budget) : null
 
-      const adsetsData = await adsetsRes.json()
-      const adsets = adsetsData.data || []
-      const activeAdsets = adsets.filter((a: any) => a.status === "ACTIVE")
-      const targetAdsets = activeAdsets.length > 0 ? activeAdsets : adsets.slice(0, 5)
+      const updateRes = await fetch(
+        `https://graph.facebook.com/v21.0/${fbCampaignId}?daily_budget=${budgetCents}&access_token=${encodeURIComponent(token)}`,
+        { method: "POST" }
+      )
+      const updateBody = await updateRes.json().catch(() => null)
 
-      if (targetAdsets.length === 0) {
-        return NextResponse.json({ success: false, message: "Nessun ad set trovato per questa campagna" })
-      }
-
-      const results: string[] = []
-      for (const adset of targetAdsets) {
-        const adsetRes = await fetch(`https://graph.facebook.com/v21.0/${adset.id}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ daily_budget: budgetCents, access_token: token }),
+      if (!updateRes.ok || updateBody?.error) {
+        return NextResponse.json({
+          success: false,
+          message: `Errore Facebook: ${updateBody?.error?.message || `HTTP ${updateRes.status}`}. Campaign ID: ${fbCampaignId}. Budget prima: €${budgetBefore ? budgetBefore / 100 : "?"}`,
         })
-        if (adsetRes.ok) {
-          results.push(`"${adset.name}": €${newBudget}/giorno ✓`)
-        } else {
-          const adsetErr = await adsetRes.json().catch(() => ({}))
-          results.push(`"${adset.name}": ${adsetErr?.error?.message || "errore"}`)
-        }
       }
 
-      await serviceClient.from("campaigns").update({ daily_budget: budgetCents }).eq("id", campaign.id)
+      const afterRes = await fetch(
+        `https://graph.facebook.com/v21.0/${fbCampaignId}?fields=daily_budget,name&access_token=${encodeURIComponent(token)}`
+      )
+      const afterData = await afterRes.json().catch(() => null)
+      const budgetAfter = afterData?.daily_budget ? Number(afterData.daily_budget) / 100 : null
+
+      if (budgetAfter !== null && Math.abs(budgetAfter - Number(newBudget)) < 0.01) {
+        await serviceClient.from("campaigns").update({ daily_budget: budgetCents }).eq("id", campaign.id)
+        return NextResponse.json({
+          success: true,
+          message: `Budget "${campaign.name}" aggiornato: €${budgetBefore ? budgetBefore / 100 : "?"} → €${budgetAfter}/giorno ✓`,
+        })
+      }
+
       return NextResponse.json({
-        success: true,
-        message: `Budget ad set (ABO) di "${campaign.name}" aggiornato:\n${results.join("\n")}`,
+        success: false,
+        message: `ATTENZIONE: Facebook ha risposto OK ma il budget NON è cambiato! Campaign ID: ${fbCampaignId}, Budget prima: €${budgetBefore ? budgetBefore / 100 : "?"}, Budget dopo: €${budgetAfter ?? "?"}, Risposta FB: ${JSON.stringify(updateBody)}`,
       })
     }
 
