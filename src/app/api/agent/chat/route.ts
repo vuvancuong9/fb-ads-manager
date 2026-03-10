@@ -80,7 +80,7 @@ QUANDO L'UTENTE CHIEDE DI CREARE QUALCOSA:
 - Quando hai abbastanza info (almeno nome + descrizione/dettagli), PROPONI l'azione con autoExecute: false
 - Quando l'utente dice "ok", "fai", "vai", "creala" → autoExecute: true
 
-REGOLE:
+REGOLE ASSOLUTE:
 1. Parla come un collega senior esperto — diretto, strategico, concreto, sicuro
 2. MAI dire "non posso" o "non ho accesso" — sei un esperto, dai sempre il tuo parere professionale
 3. Se hai dati del tool, usali con numeri precisi
@@ -92,7 +92,10 @@ REGOLE:
 9. Scrivi copy, script, strategie quando richiesto — sei un copywriter d'elite
 10. Quando scrivi COPY ADS per Facebook, scrivi SEMPRE 5 varianti con angoli diversi. Per ogni variante: Primary Text (lungo, persuasivo, con emoji), Headline (max 40 char), Description, CTA
 11. Quando proponi una STRATEGIA DI LANCIO, includi: struttura campagna, targeting, budget, timeline 7gg, kill criteria, scaling plan
-12. Rispondi SEMPRE in italiano`
+12. Rispondi SEMPRE in italiano
+13. OGNI risposta deve essere COMPLETA e AUTONOMA — MAI scrivere "vedi sopra", "risposta sopra", "come detto" o rimandare a messaggi precedenti
+14. Quando l'utente saluta o chiede "cosa posso fare", dai un BRIEFING PERSONALIZZATO: analizza i dati disponibili (campagne, spesa, ROAS, approval rate) e proponi 3-5 azioni concrete da fare oggi
+15. Il campo "reply" nel JSON deve SEMPRE contenere la risposta completa — MAI abbreviarla`
 
 async function getToolContext(serviceClient: any, userId: string, isAdmin: boolean) {
   const ctx: any = {}
@@ -256,7 +259,7 @@ async function callClaude(apiKey: string, systemPrompt: string, messages: any[])
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 4096,
+      max_tokens: 8192,
       system: systemPrompt,
       messages,
     }),
@@ -278,7 +281,7 @@ async function callOpenAI(apiKey: string, systemPrompt: string, messages: any[])
     },
     body: JSON.stringify({
       model: "gpt-4o",
-      max_tokens: 4096,
+      max_tokens: 8192,
       messages: [
         { role: "system", content: systemPrompt },
         ...messages,
@@ -371,12 +374,22 @@ export async function POST(request: NextRequest) {
 
     let parsed: any = { reply: rawResponse }
     try {
-      const jsonMatch = rawResponse.match(/\{[\s\S]*\}/)
+      let jsonStr = rawResponse
+      const codeBlockMatch = rawResponse.match(/```(?:json)?\s*([\s\S]*?)```/)
+      if (codeBlockMatch) jsonStr = codeBlockMatch[1].trim()
+      const jsonMatch = jsonStr.match(/\{[\s\S]*\}/)
       if (jsonMatch) {
         const jsonParsed = JSON.parse(jsonMatch[0])
-        if (jsonParsed.reply) parsed = jsonParsed
+        if (jsonParsed.reply && jsonParsed.reply.length > 5) {
+          parsed = jsonParsed
+        } else if (jsonParsed.reply) {
+          parsed = { ...jsonParsed, reply: rawResponse.replace(/```[\s\S]*```/, "").replace(/\{[\s\S]*\}/, "").trim() || jsonParsed.reply }
+        }
       }
-    } catch { /* response wasn't JSON, use raw text */ }
+    } catch {
+      const cleanText = rawResponse.replace(/```[\s\S]*?```/g, "").replace(/^\s*\{[\s\S]*\}\s*$/, "").trim()
+      if (cleanText.length > 10) parsed = { reply: cleanText }
+    }
 
     return NextResponse.json(parsed)
   } catch (error) {
