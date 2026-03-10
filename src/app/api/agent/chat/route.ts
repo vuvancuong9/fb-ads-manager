@@ -53,9 +53,12 @@ AZIONI ESEGUIBILI (campo "suggestedAction"):
 - "create_thank_page" — Genera thank you page per la landing
 
 **WORDPRESS:**
-- "publish_wordpress" — Pubblica landing/thank page su WordPress. extractedData: wpSiteId (ID del sito WP dalle impostazioni), pageTitle, pageType ("landing" o "thank_page")
-- "change_lp_offer" — Cambia LP/offerta su WordPress. extractedData: wpSiteId, pageId, newOfferUrl
-- "insert_form" — Inserisce/aggiorna modulo nella landing. extractedData: formType ("lead"|"order"), formFields (array di campi)
+- "publish_wordpress" — Pubblica landing/thank page su WordPress. extractedData: wpSiteId (ID sito WP), pageTitle, pageType ("landing"|"thank_page"), offerUrl (URL offerta per il form action), thankPageUrl (URL thank page per redirect dopo form)
+- "change_lp_offer" — Aggiorna pagina WP: cambia offerta/LP/thank page. extractedData: wpSiteId, pageId, newOfferUrl (nuovo URL offerta nel form), newThankPageUrl (nuovo redirect)
+
+NOTA FORM: Il modulo (nome, telefono, etc.) è GIÀ incluso nella landing page generata dall'edge function — fa parte dell'Elementor JSON. NON devi crearlo separatamente. Quando pubblichi su WordPress, imposta:
+- offerUrl → diventa l'action del form (dove invia i dati lead)
+- thankPageUrl → redirect dopo il submit del form
 
 MAPPA GEO → LINGUA (OBBLIGATORIA per generare contenuti):
 ES=Español, IT=Italiano, BG=Български, PL=Polski, PT=Português, FR=Français, DE=Deutsch, RO=Română, CZ=Čeština, GR=Ελληνικά, HR=Hrvatski, HU=Magyar, SK=Slovenčina, SI=Slovenščina, RS=Srpski, TR=Türkçe, NL=Nederlands, SE=Svenska, NO=Norsk, DK=Dansk, FI=Suomi, UK=English, US=English, GB=English, BR=Português (Brasil), MX=Español (México), AR=Español (Argentina), CL=Español (Chile), CO=Español (Colombia)
@@ -81,14 +84,18 @@ INFO OBBLIGATORIE (chiedile se mancano, UNA alla volta):
 
 FLOW AUTOMATICO (dopo aver raccolto le info):
   STEP 1: search_offers (se serve ID offerta) → autoExecute: true
-  STEP 2: create_landing (con lingua dalla GEO!) → autoExecute: true
+  STEP 2: create_landing (con lingua dalla GEO! Il modulo lead è già incluso) → autoExecute: true
   STEP 3: generate_images → autoExecute: true
   STEP 4: create_thank_page (con stessa lingua) → autoExecute: true
-  STEP 5: Chiedi all'utente: "Landing e Thank Page pronte. Vuoi che le pubblico su WordPress [nome dominio]? Vuoi inserire un modulo lead/order?"
-  STEP 6: Se confermato → publish_wordpress per landing → autoExecute: true
-  STEP 7: publish_wordpress per thank_page → autoExecute: true
-  STEP 8: insert_form se richiesto → autoExecute: true
-  STEP 9: Chiedi strategia di lancio FB se non data prima → proponi copy ads, video ads, strategia
+  STEP 5: Chiedi all'utente: "Landing e Thank Page pronte! Su quale dominio WordPress vuoi pubblicarle?" (mostra i siti configurati)
+  STEP 6: Se confermato → publish_wordpress per thank_page PRIMA (serve l'URL per il redirect) → autoExecute: true
+  STEP 7: publish_wordpress per landing con offerUrl (URL offerta nel form) + thankPageUrl (URL della thank page appena pubblicata) → autoExecute: true
+  STEP 8: Chiedi strategia di lancio FB se non data prima → proponi copy ads, video ads, strategia
+
+IMPORTANTE ORDINE PUBBLICAZIONE:
+- Pubblica PRIMA la thank page → ottieni l'URL
+- Pubblica POI la landing → imposta thankPageUrl con l'URL della thank page
+- Così il form nella landing reindirizza alla thank page dopo il submit
 
 **SE L'UTENTE DICE "FACCIAMO DOPO" per uno step:**
 - Salta quello step, prosegui con i successivi

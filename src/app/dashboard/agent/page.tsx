@@ -648,7 +648,7 @@ export default function AgentPage() {
       "pause_campaign", "activate_campaign", "pause_multiple", "activate_multiple",
       "update_budget", "sync_campaigns", "get_campaign_details",
       "sync_traffic_manager", "search_offers", "fetch_offers",
-      "publish_wordpress", "change_lp_offer", "insert_form",
+      "publish_wordpress", "change_lp_offer",
     ]
     const funnelActions = [
       "create_landing", "create_video_ads", "create_retargeting",
@@ -675,7 +675,6 @@ export default function AgentPage() {
       create_thank_page: d => `Thank Page "${d.nome || ""}"`,
       publish_wordpress: d => `Pubblica su WP "${d.pageTitle || ""}"`,
       change_lp_offer: () => "Cambia LP/Offerta",
-      insert_form: d => `Inserisci Modulo ${d.formType || "lead"}`,
     }
 
     let runningHistory = [...chatHistory, { role: "user", content: text }]

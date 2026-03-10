@@ -350,11 +350,36 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, message: `Sito WordPress "${site?.name || wpSiteId}" non configurato completamente (manca dominio, username o app password)` })
       }
 
-      const htmlContent = params?.htmlContent
+      let htmlContent = params?.htmlContent
       if (!htmlContent) return NextResponse.json({ success: false, message: "Nessun contenuto HTML da pubblicare" })
+
+      const offerUrl = params?.offerUrl
+      const thankPageUrl = params?.thankPageUrl
+
+      if (offerUrl) {
+        htmlContent = htmlContent.replace(
+          /action="[^"]*"/g,
+          `action="${offerUrl}"`
+        )
+        htmlContent = htmlContent.replace(
+          /href='#'/g,
+          `href='${offerUrl}'`
+        )
+      }
+      if (thankPageUrl) {
+        htmlContent = htmlContent.replace(
+          /<\/form>/g,
+          `<input type="hidden" name="redirect_url" value="${thankPageUrl}" /></form>`
+        )
+      }
 
       const domain = site.domain.replace(/\/$/, "")
       const auth = Buffer.from(`${site.username}:${site.app_password}`).toString("base64")
+
+      const slug = pageTitle.toLowerCase()
+        .replace(/[àáâãäå]/g, "a").replace(/[èéêë]/g, "e").replace(/[ìíîï]/g, "i")
+        .replace(/[òóôõö]/g, "o").replace(/[ùúûü]/g, "u")
+        .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
 
       try {
         const wpRes = await fetch(`${domain}/wp-json/wp/v2/pages`, {
@@ -365,6 +390,7 @@ export async function POST(request: NextRequest) {
           },
           body: JSON.stringify({
             title: pageTitle,
+            slug,
             content: htmlContent,
             status: "publish",
             template: "elementor_canvas",
@@ -380,11 +406,16 @@ export async function POST(request: NextRequest) {
           })
         }
 
+        const pageUrl = wpData.link || `${domain}/?p=${wpData.id}`
+        const extras = []
+        if (offerUrl) extras.push(`Form → ${offerUrl}`)
+        if (thankPageUrl) extras.push(`Thank Page → ${thankPageUrl}`)
+
         return NextResponse.json({
           success: true,
-          message: `${pageType === "thank_page" ? "Thank Page" : "Landing Page"} "${pageTitle}" pubblicata su ${site.name}!\nURL: ${wpData.link || `${domain}/?p=${wpData.id}`}\nID Pagina: ${wpData.id}`,
+          message: `${pageType === "thank_page" ? "Thank Page" : "Landing Page"} "${pageTitle}" pubblicata su ${site.name}!\nURL: ${pageUrl}\nID Pagina: ${wpData.id}${extras.length ? "\n" + extras.join("\n") : ""}`,
           pageId: wpData.id,
-          pageUrl: wpData.link,
+          pageUrl,
         })
       } catch (err: any) {
         return NextResponse.json({ success: false, message: `Errore connessione WordPress: ${err.message}` })
@@ -394,8 +425,9 @@ export async function POST(request: NextRequest) {
     if (action === "change_lp_offer") {
       const wpSiteId = params?.wpSiteId ?? 0
       const pageId = params?.pageId
-      const newContent = params?.htmlContent
       const newOfferUrl = params?.newOfferUrl
+      const newThankPageUrl = params?.newThankPageUrl
+      let newContent = params?.htmlContent
 
       if (!pageId) return NextResponse.json({ success: false, message: "ID pagina WordPress richiesto" })
 
@@ -414,20 +446,35 @@ export async function POST(request: NextRequest) {
       const domain = site.domain.replace(/\/$/, "")
       const auth = Buffer.from(`${site.username}:${site.app_password}`).toString("base64")
 
-      const updateData: any = {}
-      if (newContent) updateData.content = newContent
-      if (newOfferUrl) {
-        updateData.meta = { offer_url: newOfferUrl }
-      }
-
       try {
+        if (!newContent && (newOfferUrl || newThankPageUrl)) {
+          const getRes = await fetch(`${domain}/wp-json/wp/v2/pages/${pageId}`, {
+            headers: { "Authorization": `Basic ${auth}` },
+          })
+          if (getRes.ok) {
+            const pageData = await getRes.json()
+            newContent = pageData.content?.rendered || ""
+          }
+        }
+
+        if (newContent && newOfferUrl) {
+          newContent = newContent.replace(/action="[^"]*"/g, `action="${newOfferUrl}"`)
+          newContent = newContent.replace(/href='#'/g, `href='${newOfferUrl}'`)
+        }
+        if (newContent && newThankPageUrl) {
+          newContent = newContent.replace(
+            /name="redirect_url" value="[^"]*"/g,
+            `name="redirect_url" value="${newThankPageUrl}"`
+          )
+        }
+
         const wpRes = await fetch(`${domain}/wp-json/wp/v2/pages/${pageId}`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
             "Authorization": `Basic ${auth}`,
           },
-          body: JSON.stringify(updateData),
+          body: JSON.stringify({ content: newContent || undefined }),
         })
 
         const wpData = await wpRes.json()
@@ -435,51 +482,18 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ success: false, message: `Errore WordPress: ${wpData?.message || wpRes.status}` })
         }
 
+        const changes = []
+        if (newOfferUrl) changes.push(`Offerta → ${newOfferUrl}`)
+        if (newThankPageUrl) changes.push(`Thank Page → ${newThankPageUrl}`)
+        if (newContent && !newOfferUrl && !newThankPageUrl) changes.push("Contenuto aggiornato")
+
         return NextResponse.json({
           success: true,
-          message: `Pagina ${pageId} aggiornata su ${site.name}. ${newOfferUrl ? `Nuova offerta: ${newOfferUrl}` : "Contenuto aggiornato."}`,
+          message: `Pagina ${pageId} aggiornata su ${site.name}.\n${changes.join("\n")}`,
         })
       } catch (err: any) {
         return NextResponse.json({ success: false, message: `Errore: ${err.message}` })
       }
-    }
-
-    if (action === "insert_form") {
-      const formType = params?.formType || "lead"
-      const formFields = params?.formFields || ["nome", "email", "telefono"]
-      const lingua = params?.lingua || "it"
-
-      const labels: Record<string, Record<string, string>> = {
-        nome: { it: "Nome", es: "Nombre", bg: "Име", pl: "Imię", pt: "Nome", fr: "Nom", de: "Name", ro: "Nume", en: "Name" },
-        email: { it: "Email", es: "Correo", bg: "Имейл", pl: "E-mail", pt: "E-mail", fr: "E-mail", de: "E-Mail", ro: "E-mail", en: "Email" },
-        telefono: { it: "Telefono", es: "Teléfono", bg: "Телефон", pl: "Telefon", pt: "Telefone", fr: "Téléphone", de: "Telefon", ro: "Telefon", en: "Phone" },
-        indirizzo: { it: "Indirizzo", es: "Dirección", bg: "Адрес", pl: "Adres", pt: "Endereço", fr: "Adresse", de: "Adresse", ro: "Adresă", en: "Address" },
-        citta: { it: "Città", es: "Ciudad", bg: "Град", pl: "Miasto", pt: "Cidade", fr: "Ville", de: "Stadt", ro: "Oraș", en: "City" },
-      }
-
-      const lang = lingua.toLowerCase().substring(0, 2)
-      const submitLabel: Record<string, string> = {
-        it: "ORDINA ORA", es: "¡PIDE AHORA!", bg: "ПОРЪЧАЙ СЕГА!", pl: "ZAMÓW TERAZ!", pt: "PEÇA AGORA!", fr: "COMMANDEZ!", de: "JETZT BESTELLEN!", ro: "COMANDĂ ACUM!", en: "ORDER NOW!",
-      }
-
-      const fieldsHtml = formFields.map((f: string) => {
-        const label = labels[f]?.[lang] || labels[f]?.["en"] || f
-        return `<input type="${f === "email" ? "email" : "text"}" name="${f}" placeholder="${label}" required style="width:100%;padding:14px;margin:6px 0;border:1px solid #ddd;border-radius:8px;font-size:15px" />`
-      }).join("\n")
-
-      const formHtml = `<div style="background:#f8f9fa;padding:32px;border-radius:12px;margin:20px auto;max-width:500px;text-align:center">
-<form method="post" action="">
-${fieldsHtml}
-<button type="submit" style="width:100%;padding:16px;margin-top:12px;background:#e74c3c;color:#fff;border:none;border-radius:8px;font-size:18px;font-weight:bold;cursor:pointer">${submitLabel[lang] || submitLabel["en"]}</button>
-</form>
-</div>`
-
-      return NextResponse.json({
-        success: true,
-        message: `Modulo ${formType} generato con ${formFields.length} campi in ${lingua}. Usa questo HTML nella tua landing page.`,
-        formHtml,
-        type: "form",
-      })
     }
 
     return NextResponse.json({ success: false, message: `Azione "${action}" non supportata` })
