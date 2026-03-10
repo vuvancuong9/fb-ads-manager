@@ -496,6 +496,491 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // ===================================================================
+    // FACEBOOK ADS: DUPLICATE CAMPAIGN
+    // ===================================================================
+    if (action === "duplicate_campaign") {
+      const campaignName = params?.campaignName
+      const newName = params?.newName
+      const newBudget = params?.budget
+      const newStatus = params?.status || "PAUSED"
+
+      if (!campaignName) return NextResponse.json({ success: false, message: "Nome campagna richiesto" })
+
+      let { data: campaign } = await serviceClient
+        .from("campaigns").select("*, fb_ad_account:fb_ad_accounts(access_token, account_id)")
+        .ilike("name", `%${campaignName}%`).limit(1).single()
+      if (!campaign) return NextResponse.json({ success: false, message: `Campagna "${campaignName}" non trovata` })
+
+      const token = (campaign.fb_ad_account as any)?.access_token
+      if (!token) return NextResponse.json({ success: false, message: "Token mancante" })
+
+      try {
+        const copyRes = await fetch(`https://graph.facebook.com/v21.0/${campaign.fb_campaign_id}/copies`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            access_token: token,
+            ...(newStatus === "PAUSED" ? { status_option: "PAUSED" } : {}),
+          }),
+        })
+        const copyData = await copyRes.json()
+        if (!copyRes.ok || copyData.error) {
+          return NextResponse.json({ success: false, message: `Errore duplicazione: ${copyData?.error?.message || copyRes.status}` })
+        }
+
+        const newCampaignId = copyData.copied_campaign_id || copyData.campaign_id_new || copyData.id
+        if (!newCampaignId) return NextResponse.json({ success: false, message: `Duplicazione avviata ma ID non restituito. Risposta: ${JSON.stringify(copyData)}` })
+
+        const updates: Record<string, string> = { access_token: token }
+        if (newName) updates.name = newName
+        if (newBudget) updates.daily_budget = String(Math.round(Number(newBudget) * 100))
+
+        if (newName || newBudget) {
+          await fetch(`https://graph.facebook.com/v21.0/${newCampaignId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(updates),
+          })
+        }
+
+        const verifyRes = await fetch(`https://graph.facebook.com/v21.0/${newCampaignId}?fields=id,name,status,daily_budget&access_token=${encodeURIComponent(token)}`)
+        const verifyData = await verifyRes.json()
+
+        await serviceClient.from("campaigns").insert({
+          fb_campaign_id: newCampaignId,
+          fb_ad_account_id: campaign.fb_ad_account_id,
+          name: verifyData.name || newName || `${campaign.name} - Copy`,
+          status: verifyData.status || newStatus,
+          objective: campaign.objective,
+          daily_budget: verifyData.daily_budget ? Number(verifyData.daily_budget) : campaign.daily_budget,
+          bid_strategy: campaign.bid_strategy,
+        })
+
+        return NextResponse.json({
+          success: true,
+          message: `Campagna duplicata! "${campaign.name}" → "${verifyData.name || newName || campaign.name + ' - Copy'}"\nNuovo ID: ${newCampaignId}\nStato: ${verifyData.status || newStatus}\nBudget: €${verifyData.daily_budget ? Number(verifyData.daily_budget) / 100 : "invariato"}/giorno`,
+          newCampaignId,
+        })
+      } catch (err: any) {
+        return NextResponse.json({ success: false, message: `Errore: ${err.message}` })
+      }
+    }
+
+    // ===================================================================
+    // FACEBOOK ADS: CREATE CAMPAIGN
+    // ===================================================================
+    if (action === "create_campaign") {
+      const accountName = params?.accountName
+      const name = params?.name
+      const objective = params?.objective || "OUTCOME_LEADS"
+      const dailyBudget = params?.dailyBudget || params?.budget
+      const bidStrategy = params?.bidStrategy || "LOWEST_COST_WITHOUT_CAP"
+      const status = params?.status || "PAUSED"
+
+      if (!name) return NextResponse.json({ success: false, message: "Nome campagna richiesto" })
+
+      let account: any = null
+      if (accountName) {
+        const { data } = await serviceClient.from("fb_ad_accounts").select("*").ilike("name", `%${accountName}%`).eq("status", "active").limit(1).single()
+        account = data
+      }
+      if (!account) {
+        const query = isAdmin
+          ? serviceClient.from("fb_ad_accounts").select("*").eq("status", "active").limit(1).single()
+          : serviceClient.from("user_account_assignments").select("fb_ad_account_id").eq("user_id", user.id).limit(1).single()
+        const { data } = await query
+        if (data && "fb_ad_account_id" in data) {
+          const { data: acc } = await serviceClient.from("fb_ad_accounts").select("*").eq("id", data.fb_ad_account_id).single()
+          account = acc
+        } else {
+          account = data
+        }
+      }
+      if (!account?.access_token) return NextResponse.json({ success: false, message: "Nessun account Facebook trovato o token mancante" })
+
+      try {
+        const fbParams: Record<string, string> = {
+          name,
+          objective,
+          status,
+          special_ad_categories: JSON.stringify([]),
+          access_token: account.access_token,
+        }
+        if (dailyBudget) fbParams.daily_budget = String(Math.round(Number(dailyBudget) * 100))
+        if (bidStrategy) fbParams.bid_strategy = bidStrategy
+
+        const res = await fetch(`https://graph.facebook.com/v21.0/${account.account_id}/campaigns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fbParams),
+        })
+        const data = await res.json()
+
+        if (!res.ok || data.error) {
+          return NextResponse.json({ success: false, message: `Errore Facebook: ${data?.error?.message || res.status}` })
+        }
+
+        await serviceClient.from("campaigns").insert({
+          fb_campaign_id: data.id,
+          fb_ad_account_id: account.id,
+          name,
+          status,
+          objective,
+          daily_budget: dailyBudget ? Math.round(Number(dailyBudget) * 100) : null,
+          bid_strategy: bidStrategy,
+        })
+
+        return NextResponse.json({
+          success: true,
+          message: `Campagna "${name}" creata su ${account.name}!\nID: ${data.id}\nObiettivo: ${objective}\nBudget: €${dailyBudget || "non impostato"}/giorno\nStato: ${status}\nBid Strategy: ${bidStrategy}`,
+          campaignId: data.id,
+        })
+      } catch (err: any) {
+        return NextResponse.json({ success: false, message: `Errore: ${err.message}` })
+      }
+    }
+
+    // ===================================================================
+    // FACEBOOK ADS: CREATE ADSET
+    // ===================================================================
+    if (action === "create_adset") {
+      const campaignName = params?.campaignName
+      const campaignId = params?.campaignId
+      const name = params?.name
+      const dailyBudget = params?.dailyBudget || params?.budget
+      const optimizationGoal = params?.optimizationGoal || "OFFSITE_CONVERSIONS"
+      const targeting = params?.targeting || {}
+      const status = params?.status || "PAUSED"
+      const pixelId = params?.pixelId
+      const startTime = params?.startTime
+      const bidAmount = params?.bidAmount
+
+      if (!name) return NextResponse.json({ success: false, message: "Nome adset richiesto" })
+
+      let campaign: any = null
+      let fbCampaignId = campaignId
+      if (campaignName && !fbCampaignId) {
+        const { data } = await serviceClient.from("campaigns").select("*, fb_ad_account:fb_ad_accounts(access_token, account_id)").ilike("name", `%${campaignName}%`).limit(1).single()
+        campaign = data
+        fbCampaignId = data?.fb_campaign_id
+      } else if (fbCampaignId) {
+        const { data } = await serviceClient.from("campaigns").select("*, fb_ad_account:fb_ad_accounts(access_token, account_id)").eq("fb_campaign_id", fbCampaignId).limit(1).single()
+        campaign = data
+      }
+      if (!campaign) return NextResponse.json({ success: false, message: "Campagna non trovata" })
+
+      const token = (campaign.fb_ad_account as any)?.access_token
+      const accountId = (campaign.fb_ad_account as any)?.account_id
+      if (!token || !accountId) return NextResponse.json({ success: false, message: "Token o account ID mancante" })
+
+      try {
+        const fbParams: any = {
+          name,
+          campaign_id: fbCampaignId,
+          optimization_goal: optimizationGoal,
+          billing_event: "IMPRESSIONS",
+          status,
+          targeting: typeof targeting === "string" ? targeting : JSON.stringify(targeting),
+          access_token: token,
+        }
+        if (dailyBudget) fbParams.daily_budget = String(Math.round(Number(dailyBudget) * 100))
+        if (bidAmount) fbParams.bid_amount = String(Math.round(Number(bidAmount) * 100))
+        if (pixelId) fbParams.promoted_object = JSON.stringify({ pixel_id: pixelId, custom_event_type: "LEAD" })
+        if (startTime) fbParams.start_time = startTime
+
+        const res = await fetch(`https://graph.facebook.com/v21.0/${accountId}/adsets`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fbParams),
+        })
+        const data = await res.json()
+
+        if (!res.ok || data.error) {
+          return NextResponse.json({ success: false, message: `Errore Facebook: ${data?.error?.message || res.status}` })
+        }
+
+        return NextResponse.json({
+          success: true,
+          message: `Adset "${name}" creato nella campagna "${campaign.name}"!\nID: ${data.id}\nBudget: €${dailyBudget || "CBO"}/giorno\nOttimizzazione: ${optimizationGoal}\nStato: ${status}`,
+          adsetId: data.id,
+        })
+      } catch (err: any) {
+        return NextResponse.json({ success: false, message: `Errore: ${err.message}` })
+      }
+    }
+
+    // ===================================================================
+    // FACEBOOK ADS: CREATE AD WITH CREATIVE
+    // ===================================================================
+    if (action === "create_ad") {
+      const adsetName = params?.adsetName
+      const adsetId = params?.adsetId
+      const name = params?.name || "Ad"
+      const pageId = params?.pageId
+      const link = params?.link
+      const message = params?.primaryText || params?.message
+      const headline = params?.headline
+      const description = params?.description
+      const imageUrl = params?.imageUrl
+      const videoId = params?.videoId
+      const callToAction = params?.callToAction || "LEARN_MORE"
+      const status = params?.status || "PAUSED"
+
+      let resolvedAdsetId = adsetId
+      let token: string | null = null
+      let accountId: string | null = null
+
+      if (adsetName && !resolvedAdsetId) {
+        const { data: campaigns } = await serviceClient.from("campaigns")
+          .select("fb_campaign_id, fb_ad_account:fb_ad_accounts(access_token, account_id)").limit(50)
+        for (const c of campaigns || []) {
+          try {
+            const t = (c.fb_ad_account as any)?.access_token
+            if (!t) continue
+            const res = await fetch(`https://graph.facebook.com/v21.0/${c.fb_campaign_id}/adsets?fields=id,name&access_token=${encodeURIComponent(t)}&limit=100`)
+            const d = await res.json()
+            const found = (d.data || []).find((a: any) => a.name?.toLowerCase().includes(adsetName.toLowerCase()))
+            if (found) {
+              resolvedAdsetId = found.id
+              token = t
+              accountId = (c.fb_ad_account as any)?.account_id
+              break
+            }
+          } catch { /* skip */ }
+        }
+      } else if (resolvedAdsetId) {
+        const { data: accounts } = await serviceClient.from("fb_ad_accounts").select("access_token, account_id").eq("status", "active").limit(1).single()
+        token = accounts?.access_token || null
+        accountId = accounts?.account_id || null
+      }
+
+      if (!resolvedAdsetId || !token || !accountId) return NextResponse.json({ success: false, message: "Adset non trovato o token mancante" })
+      if (!pageId) return NextResponse.json({ success: false, message: "Page ID Facebook richiesto (la pagina da cui pubblicare l'ad)" })
+
+      try {
+        const objectStorySpec: any = { page_id: pageId }
+        if (videoId) {
+          objectStorySpec.video_data = {
+            video_id: videoId, title: headline || "", message: message || "",
+            link_description: description || "",
+            call_to_action: { type: callToAction, value: { link: link || "" } },
+            ...(imageUrl ? { image_url: imageUrl } : {}),
+          }
+        } else {
+          objectStorySpec.link_data = {
+            link: link || "", message: message || "", name: headline || "",
+            description: description || "",
+            call_to_action: { type: callToAction },
+            ...(imageUrl ? { picture: imageUrl } : {}),
+          }
+        }
+
+        const creativeRes = await fetch(`https://graph.facebook.com/v21.0/${accountId}/adcreatives`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: `Creative - ${name}`,
+            object_story_spec: objectStorySpec,
+            access_token: token,
+          }),
+        })
+        const creativeData = await creativeRes.json()
+        if (!creativeRes.ok || creativeData.error) {
+          return NextResponse.json({ success: false, message: `Errore creazione creative: ${creativeData?.error?.message || creativeRes.status}` })
+        }
+
+        const adRes = await fetch(`https://graph.facebook.com/v21.0/${accountId}/ads`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name,
+            adset_id: resolvedAdsetId,
+            creative: { creative_id: creativeData.id },
+            status,
+            access_token: token,
+          }),
+        })
+        const adData = await adRes.json()
+        if (!adRes.ok || adData.error) {
+          return NextResponse.json({ success: false, message: `Errore creazione ad: ${adData?.error?.message || adRes.status}` })
+        }
+
+        return NextResponse.json({
+          success: true,
+          message: `Ad "${name}" creato!\nAd ID: ${adData.id}\nCreative ID: ${creativeData.id}\nAdset: ${resolvedAdsetId}\nStato: ${status}`,
+          adId: adData.id,
+          creativeId: creativeData.id,
+        })
+      } catch (err: any) {
+        return NextResponse.json({ success: false, message: `Errore: ${err.message}` })
+      }
+    }
+
+    // ===================================================================
+    // FACEBOOK ADS: UPDATE ADSET (targeting, budget, bid, status)
+    // ===================================================================
+    if (action === "update_adset") {
+      const adsetId = params?.adsetId
+      const adsetName = params?.adsetName
+      const updates = params?.updates || {}
+
+      let resolvedId = adsetId
+      let token: string | null = null
+
+      if (adsetName && !resolvedId) {
+        const { data: campaigns } = await serviceClient.from("campaigns")
+          .select("fb_campaign_id, fb_ad_account:fb_ad_accounts(access_token)").limit(50)
+        for (const c of campaigns || []) {
+          try {
+            const t = (c.fb_ad_account as any)?.access_token
+            if (!t) continue
+            const res = await fetch(`https://graph.facebook.com/v21.0/${c.fb_campaign_id}/adsets?fields=id,name&access_token=${encodeURIComponent(t)}&limit=100`)
+            const d = await res.json()
+            const found = (d.data || []).find((a: any) => a.name?.toLowerCase().includes(adsetName.toLowerCase()))
+            if (found) { resolvedId = found.id; token = t; break }
+          } catch { /* skip */ }
+        }
+      } else if (resolvedId) {
+        const { data } = await serviceClient.from("fb_ad_accounts").select("access_token").eq("status", "active").limit(1).single()
+        token = data?.access_token || null
+      }
+
+      if (!resolvedId || !token) return NextResponse.json({ success: false, message: "Adset non trovato" })
+
+      try {
+        const fbParams: any = { access_token: token }
+        if (updates.name) fbParams.name = updates.name
+        if (updates.status) fbParams.status = updates.status
+        if (updates.dailyBudget) fbParams.daily_budget = String(Math.round(Number(updates.dailyBudget) * 100))
+        if (updates.bidAmount) fbParams.bid_amount = String(Math.round(Number(updates.bidAmount) * 100))
+        if (updates.targeting) fbParams.targeting = typeof updates.targeting === "string" ? updates.targeting : JSON.stringify(updates.targeting)
+        if (updates.optimizationGoal) fbParams.optimization_goal = updates.optimizationGoal
+        if (updates.startTime) fbParams.start_time = updates.startTime
+        if (updates.endTime) fbParams.end_time = updates.endTime
+
+        const res = await fetch(`https://graph.facebook.com/v21.0/${resolvedId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fbParams),
+        })
+        const data = await res.json()
+        if (!res.ok || data.error) {
+          return NextResponse.json({ success: false, message: `Errore Facebook: ${data?.error?.message || res.status}` })
+        }
+
+        const changeList = Object.entries(updates).map(([k, v]) => `${k}: ${v}`).join(", ")
+        return NextResponse.json({ success: true, message: `Adset ${resolvedId} aggiornato: ${changeList}` })
+      } catch (err: any) {
+        return NextResponse.json({ success: false, message: `Errore: ${err.message}` })
+      }
+    }
+
+    // ===================================================================
+    // FACEBOOK ADS: UPDATE AD (status, creative)
+    // ===================================================================
+    if (action === "update_ad") {
+      const adId = params?.adId
+      const updates = params?.updates || {}
+
+      if (!adId) return NextResponse.json({ success: false, message: "Ad ID richiesto" })
+
+      const { data } = await serviceClient.from("fb_ad_accounts").select("access_token").eq("status", "active").limit(1).single()
+      const token = data?.access_token
+      if (!token) return NextResponse.json({ success: false, message: "Token mancante" })
+
+      try {
+        const fbParams: any = { access_token: token }
+        if (updates.name) fbParams.name = updates.name
+        if (updates.status) fbParams.status = updates.status
+        if (updates.creativeId) fbParams.creative = JSON.stringify({ creative_id: updates.creativeId })
+
+        const res = await fetch(`https://graph.facebook.com/v21.0/${adId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fbParams),
+        })
+        const result = await res.json()
+        if (!res.ok || result.error) {
+          return NextResponse.json({ success: false, message: `Errore Facebook: ${result?.error?.message || res.status}` })
+        }
+
+        return NextResponse.json({ success: true, message: `Ad ${adId} aggiornato: ${Object.entries(updates).map(([k, v]) => `${k}: ${v}`).join(", ")}` })
+      } catch (err: any) {
+        return NextResponse.json({ success: false, message: `Errore: ${err.message}` })
+      }
+    }
+
+    // ===================================================================
+    // FACEBOOK ADS: GET CAMPAIGN STRUCTURE (adsets + ads)
+    // ===================================================================
+    if (action === "get_campaign_structure") {
+      const campaignName = params?.campaignName
+      if (!campaignName) return NextResponse.json({ success: false, message: "Nome campagna richiesto" })
+
+      let { data: campaign } = await serviceClient.from("campaigns")
+        .select("*, fb_ad_account:fb_ad_accounts(access_token)").ilike("name", `%${campaignName}%`).limit(1).single()
+      if (!campaign) return NextResponse.json({ success: false, message: `Campagna "${campaignName}" non trovata` })
+
+      const token = (campaign.fb_ad_account as any)?.access_token
+      if (!token) return NextResponse.json({ success: false, message: "Token mancante" })
+
+      try {
+        const adsetsRes = await fetch(`https://graph.facebook.com/v21.0/${campaign.fb_campaign_id}/adsets?fields=id,name,status,daily_budget,lifetime_budget,bid_amount,optimization_goal,targeting&limit=100&access_token=${encodeURIComponent(token)}`)
+        const adsetsData = await adsetsRes.json()
+        const adsets = adsetsData.data || []
+
+        const structure: string[] = [`**${campaign.name}** (${campaign.status})`]
+        for (const adset of adsets) {
+          const budget = adset.daily_budget ? `€${Number(adset.daily_budget) / 100}/day` : adset.lifetime_budget ? `€${Number(adset.lifetime_budget) / 100} lifetime` : "CBO"
+          structure.push(`\n  📁 ${adset.name} [${adset.status}] - ${budget}`)
+
+          const targeting = adset.targeting || {}
+          if (targeting.geo_locations?.countries) structure.push(`     GEO: ${targeting.geo_locations.countries.join(", ")}`)
+          if (targeting.age_min || targeting.age_max) structure.push(`     Età: ${targeting.age_min || 18}-${targeting.age_max || 65}`)
+
+          const adsRes = await fetch(`https://graph.facebook.com/v21.0/${adset.id}/ads?fields=id,name,status&limit=50&access_token=${encodeURIComponent(token)}`)
+          const adsData = await adsRes.json()
+          for (const ad of adsData.data || []) {
+            structure.push(`     📄 ${ad.name} [${ad.status}]`)
+          }
+        }
+
+        return NextResponse.json({
+          success: true,
+          message: `Struttura campagna:\n${structure.join("\n")}`,
+          structure: { campaign, adsets },
+        })
+      } catch (err: any) {
+        return NextResponse.json({ success: false, message: `Errore: ${err.message}` })
+      }
+    }
+
+    // ===================================================================
+    // FACEBOOK ADS: SEARCH INTERESTS
+    // ===================================================================
+    if (action === "search_interests") {
+      const query = params?.query
+      if (!query) return NextResponse.json({ success: false, message: "Query ricerca richiesta" })
+
+      const { data: account } = await serviceClient.from("fb_ad_accounts").select("access_token").eq("status", "active").limit(1).single()
+      if (!account?.access_token) return NextResponse.json({ success: false, message: "Token mancante" })
+
+      try {
+        const res = await fetch(`https://graph.facebook.com/v21.0/search?type=adinterest&q=${encodeURIComponent(query)}&limit=20&access_token=${encodeURIComponent(account.access_token)}`)
+        const data = await res.json()
+        const interests = (data.data || []).map((i: any) => `${i.name} (audience: ${i.audience_size_lower_bound || "?"}-${i.audience_size_upper_bound || "?"})`)
+
+        return NextResponse.json({
+          success: true,
+          message: `Interessi trovati per "${query}":\n${interests.join("\n") || "Nessun risultato"}`,
+          interests: data.data || [],
+        })
+      } catch (err: any) {
+        return NextResponse.json({ success: false, message: `Errore: ${err.message}` })
+      }
+    }
+
     return NextResponse.json({ success: false, message: `Azione "${action}" non supportata` })
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Error" }, { status: 500 })

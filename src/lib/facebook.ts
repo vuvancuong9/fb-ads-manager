@@ -260,6 +260,248 @@ export function parseActions(
   return { conversions, linkClicks }
 }
 
+// ===================================================================
+// DUPLICATE / COPY
+// ===================================================================
+
+export async function duplicateCampaign(
+  campaignId: string,
+  accessToken: string,
+  overrides?: { name?: string; status?: string; daily_budget?: number }
+) {
+  const params: Record<string, string> = {}
+  if (overrides?.name) params.rename_options = JSON.stringify({ rename_suffix: ` - ${overrides.name}` })
+  if (overrides?.status) params.status_option = overrides.status
+
+  const res = await fbPost(`/${campaignId}/copies`, { accessToken, params })
+  const newCampaignId = res.copied_campaign_id || res.id
+
+  if (overrides?.name && newCampaignId) {
+    await fbPost(`/${newCampaignId}`, {
+      accessToken,
+      params: { name: overrides.name },
+    })
+  }
+  if (overrides?.daily_budget && newCampaignId) {
+    await fbPost(`/${newCampaignId}`, {
+      accessToken,
+      params: { daily_budget: String(Math.round(overrides.daily_budget * 100)) },
+    })
+  }
+  return { ...res, newCampaignId }
+}
+
+export async function duplicateAdSet(
+  adsetId: string,
+  accessToken: string,
+  campaignId: string,
+  overrides?: { name?: string; daily_budget?: number }
+) {
+  const params: Record<string, string> = { campaign_id: campaignId }
+  if (overrides?.name) params.rename_options = JSON.stringify({ rename_suffix: ` - ${overrides.name}` })
+
+  const res = await fbPost(`/${adsetId}/copies`, { accessToken, params })
+  const newAdsetId = res.copied_adset_id || res.id
+
+  if (overrides?.name && newAdsetId) {
+    await fbPost(`/${newAdsetId}`, { accessToken, params: { name: overrides.name } })
+  }
+  if (overrides?.daily_budget && newAdsetId) {
+    await fbPost(`/${newAdsetId}`, { accessToken, params: { daily_budget: String(Math.round(overrides.daily_budget * 100)) } })
+  }
+  return { ...res, newAdsetId }
+}
+
+export async function duplicateAd(
+  adId: string,
+  accessToken: string,
+  adsetId: string,
+  overrides?: { name?: string }
+) {
+  const params: Record<string, string> = { adset_id: adsetId }
+  const res = await fbPost(`/${adId}/copies`, { accessToken, params })
+  const newAdId = res.copied_ad_id || res.id
+  if (overrides?.name && newAdId) {
+    await fbPost(`/${newAdId}`, { accessToken, params: { name: overrides.name } })
+  }
+  return { ...res, newAdId }
+}
+
+// ===================================================================
+// CREATE ADS & CREATIVES
+// ===================================================================
+
+export async function createAdCreative(
+  accountId: string,
+  accessToken: string,
+  data: {
+    name: string
+    pageId: string
+    link?: string
+    message?: string
+    headline?: string
+    description?: string
+    imageUrl?: string
+    imageHash?: string
+    videoId?: string
+    callToAction?: string
+    linkCaption?: string
+  }
+) {
+  const objectStorySpec: any = {
+    page_id: data.pageId,
+  }
+
+  if (data.videoId) {
+    objectStorySpec.video_data = {
+      video_id: data.videoId,
+      title: data.headline || "",
+      message: data.message || "",
+      link_description: data.description || "",
+      call_to_action: { type: data.callToAction || "LEARN_MORE", value: { link: data.link || "" } },
+      image_url: data.imageUrl || "",
+    }
+  } else {
+    objectStorySpec.link_data = {
+      link: data.link || "",
+      message: data.message || "",
+      name: data.headline || "",
+      description: data.description || "",
+      call_to_action: { type: data.callToAction || "LEARN_MORE" },
+      ...(data.imageHash ? { image_hash: data.imageHash } : data.imageUrl ? { picture: data.imageUrl } : {}),
+    }
+  }
+
+  return fbPost(`/${accountId}/adcreatives`, {
+    accessToken,
+    params: {
+      name: data.name,
+      object_story_spec: JSON.stringify(objectStorySpec),
+    } as unknown as Record<string, string>,
+  })
+}
+
+export async function createAd(
+  accountId: string,
+  accessToken: string,
+  data: {
+    name: string
+    adset_id: string
+    creative_id: string
+    status?: string
+  }
+) {
+  return fbPost(`/${accountId}/ads`, {
+    accessToken,
+    params: {
+      name: data.name,
+      adset_id: data.adset_id,
+      creative: JSON.stringify({ creative_id: data.creative_id }),
+      status: data.status || "PAUSED",
+    } as unknown as Record<string, string>,
+  })
+}
+
+export async function uploadImageByUrl(
+  accountId: string,
+  accessToken: string,
+  imageUrl: string
+) {
+  return fbPost(`/${accountId}/adimages`, {
+    accessToken,
+    params: { url: imageUrl } as unknown as Record<string, string>,
+  })
+}
+
+// ===================================================================
+// UPDATE ADSET & AD
+// ===================================================================
+
+export async function updateAdSet(
+  adsetId: string,
+  accessToken: string,
+  data: {
+    name?: string
+    status?: string
+    daily_budget?: number
+    lifetime_budget?: number
+    bid_amount?: number
+    targeting?: Record<string, unknown>
+    optimization_goal?: string
+    start_time?: string
+    end_time?: string
+  }
+) {
+  const params: Record<string, string> = {}
+  if (data.name) params.name = data.name
+  if (data.status) params.status = data.status
+  if (data.daily_budget) params.daily_budget = String(Math.round(data.daily_budget * 100))
+  if (data.lifetime_budget) params.lifetime_budget = String(Math.round(data.lifetime_budget * 100))
+  if (data.bid_amount) params.bid_amount = String(Math.round(data.bid_amount * 100))
+  if (data.targeting) params.targeting = JSON.stringify(data.targeting)
+  if (data.optimization_goal) params.optimization_goal = data.optimization_goal
+  if (data.start_time) params.start_time = data.start_time
+  if (data.end_time) params.end_time = data.end_time
+
+  return fbPost(`/${adsetId}`, { accessToken, params })
+}
+
+export async function updateAd(
+  adId: string,
+  accessToken: string,
+  data: {
+    name?: string
+    status?: string
+    creative_id?: string
+  }
+) {
+  const params: Record<string, string> = {}
+  if (data.name) params.name = data.name
+  if (data.status) params.status = data.status
+  if (data.creative_id) params.creative = JSON.stringify({ creative_id: data.creative_id })
+
+  return fbPost(`/${adId}`, { accessToken, params })
+}
+
+// ===================================================================
+// GET DETAILS
+// ===================================================================
+
+export async function getAdSetDetails(adsetId: string, accessToken: string) {
+  return fbGet(`/${adsetId}`, {
+    accessToken,
+    params: {
+      fields: "id,name,status,daily_budget,lifetime_budget,bid_amount,bid_strategy,optimization_goal,targeting,promoted_object,start_time,end_time,budget_remaining",
+    },
+  })
+}
+
+export async function getAdDetails(adId: string, accessToken: string) {
+  return fbGet(`/${adId}`, {
+    accessToken,
+    params: {
+      fields: "id,name,status,creative{id,name,title,body,thumbnail_url,object_story_spec,effective_object_story_id}",
+    },
+  })
+}
+
+export async function getCampaignFullStructure(campaignId: string, accessToken: string) {
+  const adsets = await getAdSets(campaignId, accessToken)
+  const structure: any[] = []
+  for (const adset of adsets.data || []) {
+    const ads = await getAds(adset.id, accessToken)
+    structure.push({ ...adset, ads: ads.data || [] })
+  }
+  return structure
+}
+
+export async function searchInterests(query: string, accessToken: string) {
+  return fbGet("/search", {
+    accessToken,
+    params: { type: "adinterest", q: query, limit: "20" },
+  })
+}
+
 export function parseActionValues(actionValues: Array<{ action_type: string; value: string }> | null | undefined) {
   if (!actionValues) return { conversionValue: 0 }
 

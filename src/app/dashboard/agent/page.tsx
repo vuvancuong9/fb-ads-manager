@@ -26,6 +26,8 @@ const QUICK_ACTIONS = [
   { label: "Ottimizza Budget", value: "optimize_budget", icon: Zap },
   { label: "Sincronizza", value: "sync_campaigns", icon: RefreshCw },
   { label: "Approval Rate TM", value: "check_approval", icon: Search },
+  { label: "Crea Campagna FB", value: "prompt_create_campaign", icon: Rocket },
+  { label: "Duplica Campagna", value: "prompt_duplicate_campaign", icon: Copy },
   { label: "Crea Landing", value: "prompt_landing", icon: FileCode },
   { label: "Crea Video Ads", value: "prompt_video", icon: Video },
   { label: "Funnel Completo", value: "prompt_funnel", icon: Rocket },
@@ -44,6 +46,8 @@ const ACTION_PROMPTS: Record<string, string> = {
   prompt_ad_copy: "Genera 5 varianti complete di copy ads per Facebook per il prodotto su cui stiamo lavorando. Per ogni variante scrivi: Primary Text (lungo, persuasivo, 2-3 paragrafi con emoji), Headline (max 40 caratteri, impattante), Description (1 riga), CTA. Usa angoli diversi per ogni variante: urgenza, social proof, beneficio diretto, curiosità, FOMO.",
   prompt_launch_strategy: "Crea una strategia di lancio completa per Facebook Ads per il prodotto su cui stiamo lavorando. Include: struttura campagna (CBO/ABO, quanti adset, quanti ads per adset), targeting dettagliato (interessi specifici, lookalike, custom audience), budget giornaliero consigliato per test e scaling, timeline 7 giorni step-by-step, creative testing plan, KPI target, kill criteria, e scaling plan.",
   prompt_translate_landing: "In che lingua vuoi tradurre la landing page? Dimmi la lingua e procedo subito con la traduzione.",
+  prompt_create_campaign: "Voglio creare una nuova campagna Facebook Ads. Guidami: che obiettivo, budget, bid strategy? Su quale account?",
+  prompt_duplicate_campaign: "Quale campagna vuoi duplicare? Dimmi il nome e se vuoi cambiare qualcosa (budget, nome, ecc.)",
 }
 
 function formatTime() {
@@ -153,12 +157,19 @@ HAI ACCESSO AI DATI DEL TOOL IN TEMPO REALE:
 
 COSA PUOI FARE:
 
-**ADS MANAGER:**
+**ADS MANAGER — GESTIONE COMPLETA FACEBOOK:**
 - Analizzare performance campagne (spesa, ROAS, CPA, CTR)
 - Suggerire ottimizzazioni, pausare/attivare campagne, cambiare budget
 - Identificare campagne in perdita/profittevoli
-- Analizzare approval rate Traffic Manager
-- Sincronizzare dati da Facebook
+- CREARE nuove campagne Facebook (con obiettivo, budget, bid strategy)
+- CREARE adset (con targeting, budget, pixel, ottimizzazione)
+- CREARE ads (con creative: testo, headline, immagine/video, CTA)
+- DUPLICARE campagne esistenti (con adset e ads)
+- MODIFICARE adset (targeting, budget, bid, status)
+- MODIFICARE ads (status, creative)
+- Vedere la struttura completa di una campagna (adset → ads → targeting)
+- Cercare interessi Facebook per il targeting
+- Sincronizzare dati e approval rate
 
 **FUNNEL BUILDER (via conversazione):**
 - Creare landing page (formato Elementor JSON) a partire dai dati prodotto
@@ -174,13 +185,28 @@ Per la creazione contenuti, ESTRAI I DATI PRODOTTO dalla conversazione e salvali
 
 AZIONI (campo "suggestedAction"):
 
-Ads Manager:
+Ads Manager — Gestione:
 - "sync_campaigns" — Sincronizza campagne
 - "pause_campaign" — extractedData.campaignName
 - "activate_campaign" — extractedData.campaignName
 - "pause_multiple" — extractedData.campaignNames[]
 - "activate_multiple" — extractedData.campaignNames[]
 - "update_budget" — extractedData.campaignName + extractedData.budget
+- "get_campaign_details" — extractedData.campaignName
+- "get_campaign_structure" — Struttura completa campagna → adset → ads (extractedData.campaignName)
+- "search_interests" — Cerca interessi per targeting (extractedData.query)
+
+Ads Manager — Creazione:
+- "create_campaign" — extractedData: name, objective (OUTCOME_LEADS/OUTCOME_SALES/OUTCOME_TRAFFIC), dailyBudget, bidStrategy, status, accountName
+- "create_adset" — extractedData: campaignName, name, dailyBudget, optimizationGoal, targeting (JSON), status, pixelId, bidAmount
+- "create_ad" — extractedData: adsetName, name, pageId, link, primaryText, headline, description, imageUrl/videoId, callToAction, status
+
+Ads Manager — Duplicazione:
+- "duplicate_campaign" — extractedData: campaignName, newName, budget, status
+
+Ads Manager — Modifica:
+- "update_adset" — extractedData: adsetName/adsetId, updates: { name, status, dailyBudget, bidAmount, targeting, optimizationGoal }
+- "update_ad" — extractedData: adId, updates: { name, status, creativeId }
 
 Funnel Builder:
 - "create_landing" — Genera landing page Elementor JSON (extractedData = dati prodotto: nome, descrizione, prezzoP, prezzoS, etc.)
@@ -705,9 +731,12 @@ export default function AgentPage() {
 
     const adsActions = [
       "pause_campaign", "activate_campaign", "pause_multiple", "activate_multiple",
-      "update_budget", "sync_campaigns", "get_campaign_details",
+      "update_budget", "sync_campaigns", "get_campaign_details", "get_campaign_structure",
       "sync_traffic_manager", "search_offers", "fetch_offers",
       "publish_wordpress", "change_lp_offer",
+      "create_campaign", "create_adset", "create_ad",
+      "duplicate_campaign", "update_adset", "update_ad",
+      "search_interests",
     ]
     const funnelActions = [
       "create_landing", "create_video_ads", "create_retargeting",
@@ -722,9 +751,17 @@ export default function AgentPage() {
       update_budget: d => `Budget → €${d.budget || "?"}`,
       sync_campaigns: () => "Sincronizza",
       get_campaign_details: () => "Dettagli Campagna",
+      get_campaign_structure: d => `Struttura "${d.campaignName || ""}"`,
       sync_traffic_manager: () => "Sincronizza Traffic Manager",
       search_offers: () => "Cerca Offerte Network",
       fetch_offers: () => "Carica Offerte Network",
+      create_campaign: d => `Crea Campagna "${d.name || ""}"`,
+      create_adset: d => `Crea Adset "${d.name || ""}"`,
+      create_ad: d => `Crea Ad "${d.name || ""}"`,
+      duplicate_campaign: d => `Duplica "${d.campaignName || ""}"`,
+      update_adset: d => `Modifica Adset`,
+      update_ad: d => `Modifica Ad ${d.adId || ""}`,
+      search_interests: d => `Cerca Interessi "${d.query || ""}"`,
       create_landing: d => `Crea Landing "${d.nome || ""}"`,
       create_video_ads: d => `Crea Video Ads "${d.nome || ""}"`,
       create_retargeting: d => `Crea Retargeting "${d.nome || ""}"`,
@@ -857,7 +894,7 @@ export default function AgentPage() {
       return
     }
 
-    const adsActions = ["pause_campaign", "activate_campaign", "pause_multiple", "activate_multiple", "update_budget", "sync_campaigns", "get_campaign_details", "sync_traffic_manager", "search_offers", "fetch_offers"]
+    const adsActions = ["pause_campaign", "activate_campaign", "pause_multiple", "activate_multiple", "update_budget", "sync_campaigns", "get_campaign_details", "get_campaign_structure", "sync_traffic_manager", "search_offers", "fetch_offers", "create_campaign", "create_adset", "create_ad", "duplicate_campaign", "update_adset", "update_ad", "search_interests"]
     const funnelActions = ["create_landing", "create_video_ads", "create_retargeting", "create_funnel", "translate_landing", "generate_images"]
 
     if (value === "publish_wordpress" && params) {
