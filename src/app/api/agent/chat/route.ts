@@ -42,6 +42,7 @@ AZIONI ESEGUIBILI (campo "suggestedAction"):
 - "sync_traffic_manager" — Sincronizza approval rate dal network
 - "search_offers" — Cerca offerte del network. PARAMETRI: extractedData.offerId (filtra per ID) oppure extractedData.search (filtra per nome). Senza filtri mostra tutte.
 - "create_landing" — Genera landing page (extractedData: nome, descrizione, prezzoP, prezzoS, paese/lingua, target, categoria)
+- "generate_images" — Genera immagini AI contestuali per la landing (dopo averla creata)
 - "create_video_ads" — Script video ads
 - "create_retargeting" — Ads retargeting
 - "create_funnel" — Funnel completo
@@ -328,11 +329,16 @@ export async function POST(request: NextRequest) {
     const systemPrompt = SYSTEM_PROMPT.replace("{CONTEXT}", JSON.stringify(toolContext, null, 1))
 
     const chatMessages = [
-      ...(history || []).slice(-20).map((h: any) => ({
-        role: h.role === "agent" ? "assistant" : "user",
-        content: h.content,
-      })),
-      { role: "user", content: message },
+      ...(history || []).slice(-12).map((h: any) => {
+        let content = h.content || ""
+        if (content.startsWith("[SISTEMA") && content.length > 1500) {
+          content = content.substring(0, 1500) + "\n... [dati troncati per brevità]"
+        } else if (content.length > 3000) {
+          content = content.substring(0, 3000) + "\n... [troncato]"
+        }
+        return { role: h.role === "agent" ? "assistant" : "user", content }
+      }),
+      { role: "user", content: message.length > 3000 ? message.substring(0, 3000) : message },
     ]
 
     let rawResponse = ""

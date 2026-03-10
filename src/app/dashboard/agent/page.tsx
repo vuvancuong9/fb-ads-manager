@@ -371,6 +371,7 @@ export default function AgentPage() {
             message: `Landing page generata con successo! ${sections} sezioni.\n\nL'anteprima è aperta — controlla il risultato.\n\n**Cosa vuoi fare adesso?**`,
             actions: [
               { label: "Vedi Anteprima", value: "preview_landing" },
+              { label: "Genera Immagini AI", value: "generate_images", params: merged },
               { label: "Crea Copy Ads Facebook", value: "prompt_ad_copy" },
               { label: "Crea Script Video Ads", value: "create_video_ads", params: merged },
               { label: "Strategia Lancio FB", value: "prompt_launch_strategy" },
@@ -379,6 +380,35 @@ export default function AgentPage() {
           }
         }
         return result.error || "Errore nella generazione della landing"
+      }
+
+      if (actionName === "generate_images") {
+        if (!generatedContent.landing) return "Nessuna landing disponibile. Crea prima una landing page."
+        addMessage({ role: "system", content: "Generazione immagini AI contestuali... Claude analizza ogni sezione, poi fal.ai genera immagini coerenti (30-60s)", time: formatTime() })
+        const result = await callEdgeFunction("generate_landing_images", {
+          json: generatedContent.landing,
+          nome: merged.nome || "Prodotto",
+          descrizione: merged.descrizione || "",
+          categoria: merged.categoria || "GADGET",
+          target: merged.target || "",
+        })
+        if (result.json) {
+          setGeneratedContent((prev: any) => ({ ...prev, landing: result.json }))
+          const html = elementorToHtml(result.json)
+          setPreviewHtml(html)
+          if (showPreview) setShowPreview(true)
+          return {
+            message: `Immagini generate! ${result.imagesGenerated || 0}/${result.totalSlots || 0} placeholder riempiti con immagini AI contestuali.\n\n**Cosa vuoi fare adesso?**`,
+            actions: [
+              { label: "Vedi Anteprima", value: "preview_landing" },
+              { label: "Crea Copy Ads Facebook", value: "prompt_ad_copy" },
+              { label: "Crea Script Video Ads", value: "create_video_ads", params: merged },
+              { label: "Strategia Lancio FB", value: "prompt_launch_strategy" },
+              { label: "Traduci Landing", value: "prompt_translate_landing" },
+            ],
+          }
+        }
+        return result.error || "Errore nella generazione immagini"
       }
 
       if (actionName === "create_video_ads") {
@@ -542,7 +572,7 @@ export default function AgentPage() {
     ]
     const funnelActions = [
       "create_landing", "create_video_ads", "create_retargeting",
-      "create_funnel", "translate_landing",
+      "create_funnel", "translate_landing", "generate_images",
     ]
     const actionLabels: Record<string, (d: any) => string> = {
       pause_campaign: d => `Pausa "${d.campaignName || ""}"`,
@@ -560,6 +590,7 @@ export default function AgentPage() {
       create_retargeting: d => `Crea Retargeting "${d.nome || ""}"`,
       create_funnel: d => `Funnel Completo "${d.nome || ""}"`,
       translate_landing: d => `Traduci in ${d.lingua || "..."}`,
+      generate_images: () => "Genera Immagini AI",
     }
 
     let runningHistory = [...chatHistory, { role: "user", content: text }]
@@ -670,7 +701,7 @@ export default function AgentPage() {
     }
 
     const adsActions = ["pause_campaign", "activate_campaign", "pause_multiple", "activate_multiple", "update_budget", "sync_campaigns", "get_campaign_details", "sync_traffic_manager", "search_offers", "fetch_offers"]
-    const funnelActions = ["create_landing", "create_video_ads", "create_retargeting", "create_funnel", "translate_landing"]
+    const funnelActions = ["create_landing", "create_video_ads", "create_retargeting", "create_funnel", "translate_landing", "generate_images"]
 
     if (adsActions.includes(value) && params) {
       setIsProcessing(true)
@@ -895,6 +926,10 @@ export default function AgentPage() {
             </div>
             <div className="w-64 bg-[#0e1621] p-4 border-l border-white/10 flex flex-col gap-3 shrink-0 overflow-y-auto">
               <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold">Prossimi Passi</p>
+              <button onClick={() => { handleQuickAction("generate_images", productData) }}
+                className="w-full px-3 py-2.5 rounded-lg text-xs font-medium text-left bg-gradient-to-r from-violet-500/20 to-pink-500/20 border border-violet-500/30 text-violet-300 hover:from-violet-500/30 hover:to-pink-500/30 transition-colors">
+                🖼️ Genera Immagini AI
+              </button>
               <button onClick={() => { setShowPreview(false); handleQuickAction("prompt_ad_copy") }}
                 className="w-full px-3 py-2.5 rounded-lg text-xs font-medium text-left bg-purple-500/15 border border-purple-500/30 text-purple-300 hover:bg-purple-500/30 transition-colors">
                 📝 Crea Copy Ads Facebook
