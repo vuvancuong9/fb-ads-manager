@@ -673,7 +673,8 @@ export async function POST(request: NextRequest) {
       const optimizationGoal = params?.optimizationGoal || "OFFSITE_CONVERSIONS"
       const targeting = params?.targeting || {}
       const status = params?.status || "PAUSED"
-      const pixelId = params?.pixelId
+      let pixelId = params?.pixelId
+      if (pixelId && !/^\d+$/.test(String(pixelId))) pixelId = null
       const customEventType = params?.customEventType || "LEAD"
       const startTime = params?.startTime
       const endTime = params?.endTime
@@ -718,9 +719,17 @@ export async function POST(request: NextRequest) {
         if (bidAmount) fbParams.bid_amount = String(Math.round(Number(bidAmount) * 100))
         if (bidStrategy) fbParams.bid_strategy = bidStrategy
         if (roasTarget) fbParams.roas_average_floor = String(Math.round(Number(roasTarget) * 10000))
-        if (pixelId) {
+        let resolvedPixelId = pixelId
+        if (!resolvedPixelId && ["OFFSITE_CONVERSIONS", "VALUE"].includes(optimizationGoal)) {
+          try {
+            const pixelRes = await fetch(`https://graph.facebook.com/v21.0/${accountId}/adspixels?fields=id,name&access_token=${encodeURIComponent(token)}`)
+            const pixelData = await pixelRes.json()
+            if (pixelData.data?.[0]?.id) resolvedPixelId = pixelData.data[0].id
+          } catch { /* skip */ }
+        }
+        if (resolvedPixelId) {
           fbParams.promoted_object = JSON.stringify({
-            pixel_id: pixelId,
+            pixel_id: resolvedPixelId,
             custom_event_type: customEventType,
           })
         }
@@ -762,7 +771,7 @@ export async function POST(request: NextRequest) {
           roasTarget ? `ROAS Target: ${roasTarget}x` : null,
           dynamicCreative ? "Dynamic Creative: attivo" : null,
           pacingType ? `Pacing: ${pacingType}` : null,
-          pixelId ? `Pixel: ${pixelId} (${customEventType})` : null,
+          resolvedPixelId ? `Pixel: ${resolvedPixelId} (${customEventType})${!pixelId ? " [auto-detected]" : ""}` : null,
           `Stato: ${status}`,
         ].filter(Boolean)
 
@@ -1058,7 +1067,7 @@ export async function POST(request: NextRequest) {
         if (updates.attributionSpec) fbParams.attribution_spec = typeof updates.attributionSpec === "string" ? updates.attributionSpec : JSON.stringify(updates.attributionSpec)
         if (updates.startTime) fbParams.start_time = updates.startTime
         if (updates.endTime) fbParams.end_time = updates.endTime
-        if (updates.pixelId) {
+        if (updates.pixelId && /^\d+$/.test(String(updates.pixelId))) {
           fbParams.promoted_object = JSON.stringify({
             pixel_id: updates.pixelId,
             custom_event_type: updates.customEventType || "LEAD",
