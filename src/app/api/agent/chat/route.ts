@@ -217,9 +217,14 @@ FLOW AUTOMATICO (dopo aver raccolto le info):
     - Il sistema crea automaticamente campagna + adset + ad in un unico passaggio
 
 **DUPLICAZIONE CAMPAGNA** — Quando l'utente dice "duplica", "copia", "scala" una campagna:
-  STEP 1: duplicate_campaign con deep_copy=true → copia TUTTO (adset, ads, creative, targeting, pixel, budget)
+  USA SEMPRE E SOLO "duplicate_campaign". MAI usare create_full_campaign o create_campaign per duplicare.
+  STEP 1: duplicate_campaign con campaignName → il sistema legge la struttura originale da Facebook e copia TUTTO identico (stesso account, stessi adset, stessi ads, stessa creative, stesso targeting, stesso pixel, stesso budget)
   STEP 2: Se l'utente vuole modificare nome/budget/targeting della copia → usa update_adset
-  NOTA: La duplicazione NON crea contenitori vuoti. Copia l'intera struttura identica all'originale.
+  REGOLE CRITICHE DUPLICAZIONE:
+  - NON tentare di ricreare la campagna da zero se la duplicazione fallisce — mostra l'errore e chiedi all'utente
+  - NON usare create_full_campaign come fallback — creerebbe su un account diverso con parametri sbagliati
+  - La duplicazione usa lo STESSO account Facebook dell'originale — non serve specificare accountName
+  - Se l'utente dice "scala" → duplica + eventualmente modifica budget/targeting della copia
 
 IMPORTANTE ORDINE PUBBLICAZIONE:
 - Pubblica PRIMA la thank page → ottieni l'URL
