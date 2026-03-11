@@ -1018,12 +1018,30 @@ export async function POST(request: NextRequest) {
           let creativeId: string | null = null
 
           if (postId) {
-            const crRes = await fetch(`https://graph.facebook.com/v21.0/${accountId}/adcreatives`, {
-              method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name: `Creative - ${adName}`, object_story_id: postId, access_token: token }),
-            })
-            const crData = await crRes.json()
-            if (crRes.ok && !crData.error) creativeId = crData.id
+            // Prova a trovare il creative originale che usa questo post
+            try {
+              const searchRes = await fetch(`https://graph.facebook.com/v21.0/${accountId}/ads?fields=creative{id,effective_object_story_id}&filtering=[{"field":"effective_object_story_id","operator":"EQUAL","value":"${postId}"}]&limit=1&access_token=${encodeURIComponent(token)}`)
+              const searchData = await searchRes.json()
+              if (searchData.data?.[0]?.creative?.id) creativeId = searchData.data[0].creative.id
+            } catch { /* skip */ }
+            // Fallback: prova a creare un nuovo creative
+            if (!creativeId) {
+              const crRes = await fetch(`https://graph.facebook.com/v21.0/${accountId}/adcreatives`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: `Creative - ${adName}`, object_story_id: postId, access_token: token }),
+              })
+              const crData = await crRes.json()
+              if (crRes.ok && !crData.error) creativeId = crData.id
+            }
+            if (!creativeId) {
+              const crRes = await fetch(`https://graph.facebook.com/v21.0/${accountId}/adcreatives`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: `Creative - ${adName}`, source_story_id: postId, access_token: token }),
+              })
+              const crData = await crRes.json()
+              if (crRes.ok && !crData.error) creativeId = crData.id
+            }
+            if (!creativeId) errors.push(`Creative: non riesco a usare post ${postId}. Usa creativeId direttamente.`)
           } else {
             const objectStorySpec: any = { page_id: pageId }
             if (videoId) {
@@ -1321,24 +1339,50 @@ export async function POST(request: NextRequest) {
 
       if (postId) {
         try {
-          const creativeRes = await fetch(`https://graph.facebook.com/v21.0/${accountId}/adcreatives`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              name: `Post Creative - ${name}`,
-              object_story_id: postId,
-              access_token: token,
-            }),
-          })
-          const creativeData = await creativeRes.json()
-          if (!creativeRes.ok || creativeData.error) {
-            return NextResponse.json({ success: false, message: `Errore creative da post: ${creativeData?.error?.message || creativeRes.status}` })
+          let usedCreativeId: string | null = null
+
+          // Metodo 1: Se il postId è un effective_object_story_id, cerca il creative originale
+          // cercando tra gli ads esistenti che usano questo post
+          if (!usedCreativeId) {
+            try {
+              const searchRes = await fetch(`https://graph.facebook.com/v21.0/${accountId}/ads?fields=creative{id,effective_object_story_id}&filtering=[{"field":"effective_object_story_id","operator":"EQUAL","value":"${postId}"}]&limit=1&access_token=${encodeURIComponent(token)}`)
+              const searchData = await searchRes.json()
+              const foundAd = searchData.data?.[0]
+              if (foundAd?.creative?.id) usedCreativeId = foundAd.creative.id
+            } catch { /* skip */ }
+          }
+
+          // Metodo 2: Prova a creare un nuovo creative con object_story_id
+          if (!usedCreativeId) {
+            const creativeRes = await fetch(`https://graph.facebook.com/v21.0/${accountId}/adcreatives`, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: `Post Creative - ${name}`, object_story_id: postId, access_token: token }),
+            })
+            const creativeData = await creativeRes.json()
+            if (creativeRes.ok && !creativeData.error) {
+              usedCreativeId = creativeData.id
+            }
+          }
+
+          // Metodo 3: Prova con source_story_id
+          if (!usedCreativeId) {
+            const creativeRes = await fetch(`https://graph.facebook.com/v21.0/${accountId}/adcreatives`, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: `Post Creative - ${name}`, source_story_id: postId, access_token: token }),
+            })
+            const creativeData = await creativeRes.json()
+            if (creativeRes.ok && !creativeData.error) {
+              usedCreativeId = creativeData.id
+            }
+          }
+
+          if (!usedCreativeId) {
+            return NextResponse.json({ success: false, message: `Non riesco a usare il post ${postId}. Prova con creativeId al posto di postId (usa get_post_ids per ottenere il creativeId).` })
           }
 
           const adRes = await fetch(`https://graph.facebook.com/v21.0/${accountId}/ads`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name, adset_id: resolvedAdsetId, creative: { creative_id: creativeData.id }, status, access_token: token }),
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, adset_id: resolvedAdsetId, creative: { creative_id: usedCreativeId }, status, access_token: token }),
           })
           const adData = await adRes.json()
           if (!adRes.ok || adData.error) {
@@ -1347,9 +1391,9 @@ export async function POST(request: NextRequest) {
 
           return NextResponse.json({
             success: true,
-            message: `Ad "${name}" creato da post ID esistente!\nAd ID: ${adData.id}\nPost ID: ${postId}\nSocial proof (like, commenti, condivisioni) mantenuta!\nStato: ${status}`,
+            message: `Ad "${name}" creato con post esistente!\nAd ID: ${adData.id}\nCreative ID: ${usedCreativeId}\nSocial proof mantenuta!\nStato: ${status}`,
             adId: adData.id,
-            creativeId: creativeData.id,
+            creativeId: usedCreativeId,
           })
         } catch (err: any) {
           return NextResponse.json({ success: false, message: `Errore: ${err.message}` })

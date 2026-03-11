@@ -205,7 +205,8 @@ REGOLA: Quando l'utente chiede di "creare una campagna" → usa SEMPRE "create_f
 - "get_post_ids" — Recupera post ID dalle ads per riutilizzare social proof
 
 Ads Manager — Duplicazione:
-- "duplicate_campaign" — DEEP COPY sullo STESSO account: legge la struttura originale da Facebook e copia TUTTO identico. extractedData: campaignName, newName, budget, status. USA SEMPRE QUESTO per duplicare/copiare/scalare. MAI usare create_full_campaign per duplicare.
+- "duplicate_campaign" — COPIA COMPLETA (adsets+ads+creative+targeting+pixel+budget). Gestisce automaticamente campagne grandi. extractedData: campaignName, newName, budget, status. USA SEMPRE E SOLO QUESTO per duplicare/copiare/scalare. MAI usare create_full_campaign o get_campaign_structure+ricostruzione manuale.
+- Quando usi get_post_ids, usa il creativeId (non postId) per create_ad — è più affidabile.
 
 Ads Manager — Modifica:
 - "update_adset" — extractedData: adsetName/adsetId, updates: { name, status, dailyBudget, lifetimeBudget, bidAmount, bidStrategy, roasTarget, targeting, optimizationGoal, pacingType ("standard"/"no_pacing" per accelerata), dynamicCreative, schedule, attributionSpec, pixelId, customEventType, startTime, endTime }

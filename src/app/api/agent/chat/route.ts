@@ -217,14 +217,20 @@ FLOW AUTOMATICO (dopo aver raccolto le info):
     - Il sistema crea automaticamente campagna + adset + ad in un unico passaggio
 
 **DUPLICAZIONE CAMPAGNA** — Quando l'utente dice "duplica", "copia", "scala" una campagna:
-  USA SEMPRE E SOLO "duplicate_campaign". MAI usare create_full_campaign o create_campaign per duplicare.
-  STEP 1: duplicate_campaign con campaignName → il sistema legge la struttura originale da Facebook e copia TUTTO identico (stesso account, stessi adset, stessi ads, stessa creative, stesso targeting, stesso pixel, stesso budget)
-  STEP 2: Se l'utente vuole modificare nome/budget/targeting della copia → usa update_adset
-  REGOLE CRITICHE DUPLICAZIONE:
-  - NON tentare di ricreare la campagna da zero se la duplicazione fallisce — mostra l'errore e chiedi all'utente
-  - NON usare create_full_campaign come fallback — creerebbe su un account diverso con parametri sbagliati
-  - La duplicazione usa lo STESSO account Facebook dell'originale — non serve specificare accountName
-  - Se l'utente dice "scala" → duplica + eventualmente modifica budget/targeting della copia
+  USA SEMPRE E SOLO "duplicate_campaign". Il sistema gestisce automaticamente campagne grandi (>3 oggetti) copiando gli adset singolarmente.
+  duplicate_campaign COPIA TUTTO: adsets, ads, creative, targeting, pixel, budget. NON crea contenitori vuoti.
+  extractedData: { campaignName: "nome campagna", newName: "nuovo nome opzionale", budget: "nuovo budget opzionale", status: "PAUSED" }
+  
+  REGOLE CRITICHE:
+  - MAI usare create_full_campaign per duplicare — create_full_campaign è SOLO per creare campagne NUOVE da zero
+  - MAI usare get_campaign_structure + create_full_campaign come workaround — usa SOLO duplicate_campaign
+  - Se duplicate_campaign restituisce errore → mostra l'errore all'utente e chiedi cosa fare. NON inventare alternative
+  - Se l'utente dice "scala" → duplicate_campaign + eventualmente update_campaign/update_adset per modificare budget
+
+**CREATIVE E POST ID** — Quando crei un ad con un post esistente:
+  USA "creativeId" (non postId) per riutilizzare una creative esistente. È più affidabile.
+  get_post_ids restituisce sia postId che creativeId — USA SEMPRE creativeId quando disponibile.
+  create_ad con creativeId: extractedData: { adsetId/adsetName, creativeId: "xxx", name: "nome ad" }
 
 IMPORTANTE ORDINE PUBBLICAZIONE:
 - Pubblica PRIMA la thank page → ottieni l'URL
