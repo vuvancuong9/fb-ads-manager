@@ -636,13 +636,38 @@ export async function POST(request: NextRequest) {
           const origAdsets = origAdsetsData.data || []
 
           for (const adset of origAdsets) {
-            try {
-              await fetch(`https://graph.facebook.com/v21.0/${adset.id}/copies`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ access_token: token, campaign_id: newCampaignId, deep_copy: true, status_option: "PAUSED" }),
-              })
-            } catch { /* skip singolo adset, continua con gli altri */ }
+            // Livello 2: prova deep_copy sull'adset
+            const adsetCopyRes = await fetch(`https://graph.facebook.com/v21.0/${adset.id}/copies`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ access_token: token, campaign_id: newCampaignId, deep_copy: true, status_option: "PAUSED" }),
+            })
+            const adsetCopyData = await adsetCopyRes.json()
+
+            if (adsetCopyRes.ok && !adsetCopyData.error) continue
+
+            // Livello 3: adset ha troppi ads → copia adset vuoto + copia ogni ad singolarmente
+            const adsetShellRes = await fetch(`https://graph.facebook.com/v21.0/${adset.id}/copies`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ access_token: token, campaign_id: newCampaignId, deep_copy: false, status_option: "PAUSED" }),
+            })
+            const adsetShellData = await adsetShellRes.json()
+            const newAdsetId = adsetShellData.copied_adset_id
+            if (!newAdsetId) continue
+
+            // Leggi gli ads originali dell'adset e copiali uno per uno
+            const origAdsRes = await fetch(`https://graph.facebook.com/v21.0/${adset.id}/ads?fields=id,name&limit=100&access_token=${encodeURIComponent(token)}`)
+            const origAdsData = await origAdsRes.json()
+            for (const ad of origAdsData.data || []) {
+              try {
+                await fetch(`https://graph.facebook.com/v21.0/${ad.id}/copies`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ access_token: token, adset_id: newAdsetId, status_option: "PAUSED" }),
+                })
+              } catch { /* singolo ad fallito, continua */ }
+            }
           }
         }
 
