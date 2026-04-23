@@ -1,104 +1,113 @@
 import * as XLSX from 'xlsx'
 import Papa from 'papaparse'
 import { ORDER_COLUMN_MAP } from './parser-config'
-import { parseSubId } from './subid-parser'
-import { parse as parseDate, isValid, startOfDay } from 'date-fns'
+import { parseSubId, parseTkAff } from './subid-parser'
 
 export interface ParsedOrderRow {
-  rowIndex: number
-  reportDate: Date | null
-  orderId: string | null
-  subIdRaw: string | null
-  subIdNormalized: string | null
-  tkAff: string | null
-  commission: number
-  orderAmount: number
-  status: string | null
-  rawData: Record<string, unknown>
-  parseErrors: string[]
+    rowIndex: number
+    reportDate: string | null
+    orderId: string | null
+    subidRaw: string | null
+    subidNormalized: string | null
+    tkAff: string | null
+    commission: number
+    orderAmount: number
+    status: string | null
+    rawData: Record<string, unknown>
+    parseErrors: string[]
 }
 
 export interface OrderParseResult {
-  rows: ParsedOrderRow[]
-  errorRows: ParsedOrderRow[]
-  preview: ParsedOrderRow[]
-  columnMapping: Record<string, string>
-  totalRows: number
-  errorCount: number
+    rows: ParsedOrderRow[]
+    errorRows: ParsedOrderRow[]
+    preview: ParsedOrderRow[]
+    columnMapping: Record<string, string>
+    totalRows: number
+    errorCount: number
 }
 
 function normalizeKey(h: string) {
-  return h.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim()
-}
-function findCol(headers: string[], aliases: string[]): string | null {
-  const norm = headers.map(h => ({ o: h, k: normalizeKey(h) }))
-  for (const a of aliases) {
-    const f = norm.find(h => h.k.includes(a.toLowerCase()))
-    if (f) return f.o
-  }
-  return null
-}
-function parseAmount(val: unknown): number {
-  if (!val && val !== 0) return 0
-  const n = parseFloat(String(val).replace(/[,\s₫đ]/g, ''))
-  return isNaN(n) ? 0 : n
-}
-function parseFlexDate(val: unknown): Date | null {
-  if (!val) return null
-  if (val instanceof Date) return isValid(val) ? startOfDay(val) : null
-  const s = String(val).trim()
-  for (const fmt of ['yyyy-MM-dd', 'dd/MM/yyyy', 'MM/dd/yyyy', 'dd-MM-yyyy']) {
-    const d = parseDate(s, fmt, new Date())
-    if (isValid(d)) return startOfDay(d)
-  }
-  return null
+    return h.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-export async function parseOrderFile(buffer: Buffer, filename: string): Promise<OrderParseResult> {
-  let rawRows: Record<string, unknown>[] = []
-  const ext = filename.toLowerCase().split('.').pop()
-  if (ext === 'xlsx' || ext === 'xls') {
-    const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true })
-    rawRows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }) as Record<string, unknown>[]
-  } else {
-    const result = Papa.parse<Record<string, unknown>>(buffer.toString('utf-8'), { header: true, skipEmptyLines: true })
-    rawRows = result.data
-  }
-  if (!rawRows.length) return { rows: [], errorRows: [], preview: [], columnMapping: {}, totalRows: 0, errorCount: 0 }
+function findCol(headers: string[], aliases: string[]): string | null {
+    const norm = headers.map(h => ({ o: h, k: normalizeKey(h) }))
+    for (const a of aliases) {
+          const f = norm.find(h => h.k.includes(a.toLowerCase()))
+          if (f) return f.o
+    }
+    return null
+}
+
+function parseAmount(val: unknown): number {
+    if (!val && val !== 0) return 0
+    const n = parseFloat(String(val).replace(/[^\d.-]/g, ''))
+    return isNaN(n) ? 0 : n
+}
+
+function parseDateStr(val: unknown): string | null {
+    if (!val) return null
+    const s = String(val).trim()
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.substring(0, 10)
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/)
+    if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`
+    const m2 = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/)
+    if (m2) return `${m2[1]}-${m2[2].padStart(2,'0')}-${m2[3].padStart(2,'0')}`
+    return s.substring(0, 10) || null
+}
+
+export function parseOrderFile(buffer: ArrayBuffer): OrderParseResult {
+    let rawRows: Record<string, unknown>[] = []
+        try {
+              const wb = XLSX.read(buffer, { type: 'array', cellDates: false })
+              const ws = wb.Sheets[wb.SheetNames[0]]
+              rawRows = XLSX.utils.sheet_to_json(ws, { defval: '' })
+        } catch {
+              const text = new TextDecoder().decode(buffer)
+              const result = Papa.parse<Record<string, unknown>>(text, { header: true, skipEmptyLines: true })
+              rawRows = result.data
+        }
+    if (!rawRows.length) return { rows: [], errorRows: [], preview: [], columnMapping: {}, totalRows: 0, errorCount: 0 }
 
   const headers = Object.keys(rawRows[0])
-  const colMap: Record<string, string> = {}
-  for (const [field, aliases] of Object.entries(ORDER_COLUMN_MAP)) {
-    const found = findCol(headers, aliases)
-    if (found) colMap[field] = found
-  }
+    const colMap = ORDER_COLUMN_MAP
+    const dateCol = findCol(headers, colMap.reportDate ?? ['ngay','date','order date','created','thoi gian'])
+    const orderIdCol = findCol(headers, colMap.orderId ?? ['order id','ma don','id','don hang'])
+    const subidCol = findCol(headers, colMap.subid ?? ['subid','sub id','utm_content','tracking','ma gioi thieu'])
+    const commissionCol = findCol(headers, colMap.commission ?? ['commission','hoa hong','tien thuong'])
+    const orderAmountCol = findCol(headers, colMap.orderAmount ?? ['order amount','gia tri','revenue'])
+    const statusCol = findCol(headers, colMap.status ?? ['status','trang thai'])
+
+  const columnMapping: Record<string, string> = {}
+      if (dateCol) columnMapping['reportDate'] = dateCol
+    if (subidCol) columnMapping['subid'] = subidCol
+    if (commissionCol) columnMapping['commission'] = commissionCol
 
   const rows: ParsedOrderRow[] = []
-  const errorRows: ParsedOrderRow[] = []
+      const errorRows: ParsedOrderRow[] = []
 
-  rawRows.forEach((raw, idx) => {
-    const errors: string[] = []
-    const reportDate = parseFlexDate(colMap.reportDate ? raw[colMap.reportDate] : null)
-    if (!reportDate) errors.push('Khong xac dinh duoc ngay')
-    const subIdRaw = colMap.subId ? String(raw[colMap.subId] ?? '').trim() || null : null
-    const { normalized: subIdNormalized, tkAff } = subIdRaw ? parseSubId(subIdRaw) : { normalized: null, tkAff: null }
+          rawRows.forEach((r, i) => {
+                const errors: string[] = []
+                      const subidRaw = subidCol ? String(r[subidCol] ?? '').trim() || null : null
+                const reportDate = dateCol ? parseDateStr(r[dateCol]) : null
+    if (!reportDate) errors.push('Thieu ngay don hang')
+                if (!subidRaw) errors.push('Thieu Sub ID')
+                const row: ParsedOrderRow = {
+                        rowIndex: i + 2,
+                        reportDate,
+                        orderId: orderIdCol ? String(r[orderIdCol] ?? '').trim() || null : null,
+                        subidRaw,
+                        subidNormalized: subidRaw ? parseSubId(subidRaw) : null,
+                        tkAff: subidRaw ? parseTkAff(subidRaw) : null,
+                        commission: commissionCol ? parseAmount(r[commissionCol]) : 0,
+                        orderAmount: orderAmountCol ? parseAmount(r[orderAmountCol]) : 0,
+                        status: statusCol ? String(r[statusCol] ?? '').trim() || null : null,
+                        rawData: r,
+                        parseErrors: errors,
+                }
+                if (errors.length > 0) errorRows.push(row)
+                else rows.push(row)
+          })
 
-    const parsed: ParsedOrderRow = {
-      rowIndex: idx + 1,
-      reportDate,
-      orderId: colMap.orderId ? String(raw[colMap.orderId] ?? '').trim() || null : null,
-      subIdRaw,
-      subIdNormalized,
-      tkAff,
-      commission: parseAmount(colMap.commission ? raw[colMap.commission] : 0),
-      orderAmount: parseAmount(colMap.orderAmount ? raw[colMap.orderAmount] : 0),
-      status: colMap.status ? String(raw[colMap.status] ?? '').trim() || null : null,
-      rawData: raw,
-      parseErrors: errors,
-    }
-    if (errors.length) errorRows.push(parsed)
-    else rows.push(parsed)
-  })
-
-  return { rows, errorRows, preview: [...rows, ...errorRows].slice(0, 20), columnMapping: colMap, totalRows: rawRows.length, errorCount: errorRows.length }
+  return { rows, errorRows, preview: [...rows, ...errorRows].slice(0, 20), columnMapping, totalRows: rawRows.length, errorCount: errorRows.length }
 }
