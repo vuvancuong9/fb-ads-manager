@@ -2,11 +2,11 @@
 import { useEffect, useState } from 'react'
 
 const SUGGESTION_LABEL: Record<string, { label: string; color: string }> = {
-  INCREASE_20: { label: 'Tang 20%', color: 'bg-green-100 text-green-700' },
-  DECREASE_20: { label: 'Giam 20%', color: 'bg-yellow-100 text-yellow-700' },
-  PAUSE:       { label: 'Tat ads', color: 'bg-red-100 text-red-700' },
-  KEEP:        { label: 'Giu nguyen', color: 'bg-blue-100 text-blue-700' },
-  NO_ACTION:   { label: 'Khong hanh dong', color: 'bg-gray-100 text-gray-500' },
+  INCREASE_20: { label: 'Tăng 20%', color: 'bg-green-100 text-green-700' },
+  DECREASE_20: { label: 'Giảm 20%', color: 'bg-yellow-100 text-yellow-700' },
+  PAUSE:       { label: 'Tắt ads', color: 'bg-red-100 text-red-700' },
+  KEEP:        { label: 'Giữ nguyên', color: 'bg-blue-100 text-blue-700' },
+  NO_ACTION:   { label: 'Không hành động', color: 'bg-gray-100 text-gray-500' },
 }
 
 function fmtVND(n: number) { return n >= 1000000 ? (n/1000000).toFixed(1)+'M' : n >= 1000 ? (n/1000).toFixed(0)+'K' : String(Math.round(n)) }
