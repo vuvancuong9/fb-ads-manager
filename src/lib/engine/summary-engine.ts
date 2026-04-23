@@ -1,116 +1,134 @@
-import { prisma } from '@/lib/prisma'
-import { getLatestAdsDate, getActiveSubIds, calcRoi } from './calculation'
-import { applyRules, SubIdMetrics } from './rule-engine'
-import { startOfDay, endOfDay } from 'date-fns'
-import { ActionSuggestion } from '@prisma/client'
+// Summary Engine - Affiliate Ads Manager
+// Uses Supabase instead of Prisma
 
-export async function rebuildSummary(targetDate?: Date) {
-  const latestDate = targetDate ?? await getLatestAdsDate()
+import { supabaseAdmin } from '@/lib/supabase-admin'
+import { applyRules, applyDefaultRules, ActionSuggestion, SubidMetrics } from './rule-engine'
+import { calcRoi } from './calculation'
+
+export interface SubidSummary {
+    subid_normalized: string
+    tk_aff: string | null
+    ads_ngay: number
+    don_ngay: number
+    hoa_hong_ngay: number
+    roi_ngay: number
+    tong_ads: number
+    tong_hoa_hong: number
+    roi_tong: number
+    goi_y: ActionSuggestion
+    ly_do: string
+    ngay_ads: string | null
+    has_ads_latest_day: boolean
+}
+
+export async function rebuildSummary(targetDate?: string): Promise<{ rebuilt: number; message: string }> {
+    let latestDate = targetDate
+    if (!latestDate) {
+          const { data: dateRow } = await supabaseAdmin
+            .from('ads_daily_stats')
+            .select('report_date')
+            .order('report_date', { ascending: false })
+            .limit(1)
+            .single()
+          latestDate = dateRow?.report_date ?? null
+    }
+
   if (!latestDate) return { rebuilt: 0, message: 'Khong co du lieu ads' }
 
-  const activeSubIds = await getActiveSubIds(latestDate)
+  const { data: activeAdsRows } = await supabaseAdmin
+      .from('ads_daily_stats')
+      .select('subid_normalized')
+      .eq('report_date', latestDate)
+      .gt('spend', 0)
 
-  // Lay all sub IDs co ads trong ngay moi nhat
-  const adsToday = await prisma.adsDailyStats.groupBy({
-    by: ['subIdNormalized', 'tkAff'],
-    where: {
-      reportDate: { gte: startOfDay(latestDate), lte: endOfDay(latestDate) },
-    },
-    _sum: { spend: true, impressions: true, clicks: true },
-  })
+  const activeSubids = new Set((activeAdsRows ?? []).map((r: any) => r.subid_normalized))
 
-  // Rules
-  const dbRules = await prisma.rule.findMany({ where: { isActive: true }, orderBy: { priority: 'asc' } })
-  const rules = dbRules.map(r => ({ ...r, conditions: r.conditions as any }))
+  const { data: adsTodayRows } = await supabaseAdmin
+      .from('ads_daily_stats')
+      .select('subid_normalized, tk_aff, spend')
+      .eq('report_date', latestDate)
+
+  const { data: dbRules } = await supabaseAdmin
+      .from('rules')
+      .select('*')
+      .eq('is_active', true)
+      .order('priority', { ascending: false })
+
+  const rules = (dbRules ?? []).map((r: any) => ({ ...r, conditions: r.conditions as any }))
 
   let rebuilt = 0
 
-  for (const row of adsToday) {
-    const subId = row.subIdNormalized
-    const tkAff = row.tkAff
+  for (const row of (adsTodayRows ?? [])) {
+        const subid = row.subid_normalized
+        const tkAff = row.tk_aff
 
-    // Orders ngay
-    const ordersToday = await prisma.order.aggregate({
-      where: {
-        subIdNormalized: subId,
-        reportDate: { gte: startOfDay(latestDate), lte: endOfDay(latestDate) },
-      },
-      _sum: { commission: true, orderAmount: true },
-      _count: { id: true },
-    })
+      const { data: ordersToday } = await supabaseAdmin
+          .from('orders')
+          .select('commission')
+          .eq('subid_normalized', subid)
+          .eq('report_date', latestDate)
 
-    // Tong hop lich su
-    const totalAds = await prisma.adsDailyStats.aggregate({
-      where: { subIdNormalized: subId },
-      _sum: { spend: true },
-    })
-    const totalOrders = await prisma.order.aggregate({
-      where: { subIdNormalized: subId },
-      _sum: { commission: true, orderAmount: true },
-      _count: { id: true },
-    })
+      const commissionToday = (ordersToday ?? []).reduce((sum: number, o: any) => sum + (o.commission ?? 0), 0)
+        const donNgay = (ordersToday ?? []).length
 
-    const adsDaily = row._sum.spend ?? 0
-    const commissionDaily = ordersToday._sum.commission ?? 0
-    const ordersDaily = ordersToday._count.id ?? 0
-    const roiDaily = calcRoi(commissionDaily, adsDaily)
-    const totalAdsAllTime = totalAds._sum.spend ?? 0
-    const totalCommissionAllTime = totalOrders._sum.commission ?? 0
-    const totalOrdersAllTime = totalOrders._count.id ?? 0
-    const roiTotal = calcRoi(totalCommissionAllTime, totalAdsAllTime)
-    const hasAdsLatestDay = activeSubIds.has(subId)
+      const { data: totalAdsRows } = await supabaseAdmin
+          .from('ads_daily_stats')
+          .select('spend')
+          .eq('subid_normalized', subid)
 
-    const metrics: SubIdMetrics = {
-      subIdNormalized: subId,
-      tkAff,
-      adsDaily,
-      ordersDaily,
-      commissionDaily,
-      roiDaily,
-      totalAds: totalAdsAllTime,
-      totalOrders: totalOrdersAllTime,
-      totalCommission: totalCommissionAllTime,
-      roiTotal,
-      hasAdsLatestDay,
-    }
+      const tongAds = (totalAdsRows ?? []).reduce((sum: number, r: any) => sum + (r.spend ?? 0), 0)
 
-    const { suggestion, reason } = applyRules(metrics, rules)
+      const { data: totalOrderRows } = await supabaseAdmin
+          .from('orders')
+          .select('commission')
+          .eq('subid_normalized', subid)
 
-    await prisma.subidDailySummary.upsert({
-      where: { reportDate_subIdNormalized: { reportDate: latestDate, subIdNormalized: subId } },
-      create: {
-        reportDate: latestDate,
-        subIdNormalized: subId,
-        tkAff,
-        adsSpend: adsDaily,
-        orderCount: ordersDaily,
-        totalCommission: commissionDaily,
-        roiDaily,
-        totalAdsAllTime,
-        totalOrdersAllTime,
-        totalCommissionAllTime,
-        roiTotal,
-        hasAdsLatestDay,
-        actionSuggestion: suggestion,
-        actionReason: reason,
-      },
-      update: {
-        adsSpend: adsDaily,
-        orderCount: ordersDaily,
-        totalCommission: commissionDaily,
-        roiDaily,
-        totalAdsAllTime,
-        totalOrdersAllTime,
-        totalCommissionAllTime,
-        roiTotal,
-        hasAdsLatestDay,
-        actionSuggestion: suggestion,
-        actionReason: reason,
-      },
-    })
+      const tongHoaHong = (totalOrderRows ?? []).reduce((sum: number, o: any) => sum + (o.commission ?? 0), 0)
 
-    rebuilt++
+      const adsNgay = row.spend ?? 0
+        const roiNgay = calcRoi(commissionToday, adsNgay)
+        const roiTong = calcRoi(tongHoaHong, tongAds)
+        const hasAdsLatestDay = activeSubids.has(subid)
+
+      const metrics: SubidMetrics = {
+              subidNormalized: subid,
+              tkAff,
+              adsDaily: adsNgay,
+              ordersDaily: donNgay,
+              commissionDaily: commissionToday,
+              roiDaily: roiNgay,
+              totalAds: tongAds,
+              totalOrders: (totalOrderRows ?? []).length,
+              totalCommission: tongHoaHong,
+              roiTotal: roiTong,
+              hasAdsLatestDay,
+      }
+
+      const { suggestion, reason } = rules.length > 0
+          ? applyRules(metrics, rules)
+              : applyDefaultRules(metrics)
+
+      await supabaseAdmin
+          .from('subid_summary')
+          .upsert({
+                    subid_normalized: subid,
+                    tk_aff: tkAff,
+                    ads_ngay: adsNgay,
+                    don_ngay: donNgay,
+                    hoa_hong_ngay: commissionToday,
+                    roi_ngay: roiNgay,
+                    tong_ads: tongAds,
+                    tong_hoa_hong: tongHoaHong,
+                    roi_tong: roiTong,
+                    goi_y: suggestion,
+                    ly_do: reason,
+                    ngay_ads: latestDate,
+                    has_ads_latest_day: hasAdsLatestDay,
+                    updated_at: new Date().toISOString(),
+          }, { onConflict: 'subid_normalized' })
+
+      rebuilt++
   }
 
-  return { rebuilt, latestDate }
+  return { rebuilt, message: `Da tinh toan lai ${rebuilt} Sub ID` }
 }
