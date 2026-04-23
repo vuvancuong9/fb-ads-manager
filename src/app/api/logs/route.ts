@@ -1,25 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const page = parseInt(searchParams.get('page') ?? '1')
   const limit = parseInt(searchParams.get('limit') ?? '50')
-  const action = searchParams.get('action')
+  const from = (page - 1) * limit
 
-  const where: any = {}
-  if (action) where.action = { contains: action }
+  const { data, count } = await supabaseAdmin
+    .from('action_logs').select('*', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(from, from + limit - 1)
 
-  const [data, total] = await Promise.all([
-    prisma.actionLog.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      skip: (page - 1) * limit,
-      take: limit,
-      include: { user: { select: { name: true, email: true } } },
-    }),
-    prisma.actionLog.count({ where }),
-  ])
-
-  return NextResponse.json({ data, total, page, limit })
+  return NextResponse.json({ data: data ?? [], total: count ?? 0, page, limit })
 }

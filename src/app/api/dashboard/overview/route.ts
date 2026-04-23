@@ -1,55 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { getLatestAdsDate } from '@/lib/engine/calculation'
-import { startOfDay, endOfDay } from 'date-fns'
+import { supabaseAdmin } from '@/lib/supabase-admin'
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
-    const latestDate = await getLatestAdsDate()
+    const { data: latestRow } = await supabaseAdmin
+      .from('ads_daily_stats').select('report_date').order('report_date', { ascending: false }).limit(1).single()
 
-    const [adsToday, ordersToday, totalAds, totalOrders, subidStats] = await Promise.all([
-      latestDate ? prisma.adsDailyStats.aggregate({
-        where: { reportDate: { gte: startOfDay(latestDate), lte: endOfDay(latestDate) } },
-        _sum: { spend: true },
-      }) : { _sum: { spend: 0 } },
-      latestDate ? prisma.order.aggregate({
-        where: { reportDate: { gte: startOfDay(latestDate), lte: endOfDay(latestDate) } },
-        _sum: { commission: true },
-        _count: { id: true },
-      }) : { _sum: { commission: 0 }, _count: { id: 0 } },
-      prisma.adsDailyStats.aggregate({ _sum: { spend: true } }),
-      prisma.order.aggregate({ _sum: { commission: true }, _count: { id: true } }),
-      latestDate ? prisma.subidDailySummary.findMany({
-        where: { reportDate: { gte: startOfDay(latestDate), lte: endOfDay(latestDate) }, hasAdsLatestDay: true },
-        select: { roiDaily: true, actionSuggestion: true },
-      }) : [],
+    const latestDate = latestRow?.report_date
+    const latestDay = latestDate?.substring(0, 10)
+
+    const [adsAgg, ordersAgg, totalAdsAgg, totalOrdersAgg, subidStats] = await Promise.all([
+      latestDay ? supabaseAdmin.from('ads_daily_stats').select('spend').gte('report_date', latestDay+'T00:00:00Z').lte('report_date', latestDay+'T23:59:59Z') : { data: [] },
+      latestDay ? supabaseAdmin.from('orders').select('commission').gte('report_date', latestDay+'T00:00:00Z').lte('report_date', latestDay+'T23:59:59Z') : { data: [] },
+      supabaseAdmin.from('ads_daily_stats').select('spend'),
+      supabaseAdmin.from('orders').select('commission'),
+      latestDay ? supabaseAdmin.from('subid_daily_summary').select('roi_daily,action_suggestion').eq('has_ads_latest_day', true).gte('report_date', latestDay+'T00:00:00Z').lte('report_date', latestDay+'T23:59:59Z') : { data: [] },
     ])
 
-    const adsSpendToday = adsToday._sum.spend ?? 0
-    const commissionToday = ordersToday._sum.commission ?? 0
-    const roiToday = adsSpendToday > 0 ? commissionToday / adsSpendToday : 0
-    const totalAdsAllTime = totalAds._sum.spend ?? 0
-    const totalCommAllTime = totalOrders._sum.commission ?? 0
-    const roiTotal = totalAdsAllTime > 0 ? totalCommAllTime / totalAdsAllTime : 0
-
-    const subStats = subidStats as { roiDaily: number; actionSuggestion: string }[]
-    const activeCount = subStats.length
-    const profitCount = subStats.filter(s => s.roiDaily >= 1).length
-    const lossCount = subStats.filter(s => s.roiDaily < 0.8 && s.roiDaily > 0).length
+    const adsToday = (adsAgg.data ?? []).reduce((s, r) => s + (r.spend ?? 0), 0)
+    const commToday = (ordersAgg.data ?? []).reduce((s, r) => s + (r.commission ?? 0), 0)
+    const ordersToday = ordersAgg.data?.length ?? 0
+    const totalAds = (totalAdsAgg.data ?? []).reduce((s, r) => s + (r.spend ?? 0), 0)
+    const totalComm = (totalOrdersAgg.data ?? []).reduce((s, r) => s + (r.commission ?? 0), 0)
+    const totalOrders = totalOrdersAgg.data?.length ?? 0
+    const subs = subidStats.data ?? []
 
     return NextResponse.json({
-      adsToday: adsSpendToday,
-      ordersToday: ordersToday._count.id ?? 0,
-      commissionToday,
-      roiToday: Math.round(roiToday * 100) / 100,
-      totalAds: totalAdsAllTime,
-      totalOrders: totalOrders._count.id ?? 0,
-      totalCommission: totalCommAllTime,
-      roiTotal: Math.round(roiTotal * 100) / 100,
-      activeSubCount: activeCount,
-      profitSubCount: profitCount,
-      lossSubCount: lossCount,
-      latestDate: latestDate?.toISOString() ?? null,
+      adsToday, ordersToday, commissionToday: commToday,
+      roiToday: adsToday > 0 ? Math.round(commToday / adsToday * 100) / 100 : 0,
+      totalAds, totalOrders, totalCommission: totalComm,
+      roiTotal: totalAds > 0 ? Math.round(totalComm / totalAds * 100) / 100 : 0,
+      activeSubCount: subs.length,
+      profitSubCount: subs.filter((s: any) => s.roi_daily >= 1).length,
+      lossSubCount: subs.filter((s: any) => s.roi_daily > 0 && s.roi_daily < 0.8).length,
+      latestDate: latestDate ?? null,
     })
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
