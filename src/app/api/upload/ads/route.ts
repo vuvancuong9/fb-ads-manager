@@ -7,6 +7,16 @@ export const maxDuration = 60
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+function pickReportDate(rows: { reportDate: string | null }[]): string {
+  for (const r of rows) {
+    if (r && r.reportDate) {
+      const d = new Date(r.reportDate)
+      if (!isNaN(d.getTime())) return d.toISOString()
+    }
+  }
+  return new Date().toISOString()
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData()
@@ -26,12 +36,16 @@ export async function POST(req: NextRequest) {
     }
 
     const result = parseAdsFile(buffer)
-    const reportDate = result.rows[0]?.reportDate ?? result.errorRows[0]?.reportDate ?? null
+    const reportDate = pickReportDate([...(result.rows || []), ...(result.errorRows || [])])
 
     const { data: uploadedFile, error: insertErr } = await supabaseAdmin.from('uploaded_files').insert({
-      file_name: file.name, file_hash: fileHash, file_type: 'ads',
-      report_date: reportDate, row_count: result.totalRows,
-      error_count: result.errorCount, status: 'processing',
+      file_name: file.name,
+      file_hash: fileHash,
+      file_type: 'ads',
+      report_date: reportDate,
+      row_count: result.totalRows,
+      error_count: result.errorCount,
+      status: 'processing',
     }).select().single()
 
     if (insertErr || !uploadedFile) {
@@ -44,49 +58,76 @@ export async function POST(req: NextRequest) {
       }, { status: 500 })
     }
 
-    const batchSize = 100
-    if (result.rows.length > 0) {
-      for (let i = 0; i < result.rows.length; i += batchSize) {
-        const batch = result.rows.slice(i, i + batchSize)
-        const { error: rawErr } = await supabaseAdmin.from('raw_ads_rows').insert(batch.map(row => ({
-          uploaded_file_id: uploadedFile.id, row_index: row.rowIndex,
-          report_date: row.reportDate, campaign_id: row.campaignId,
-          campaign_name: row.campaignName, adset_id: row.adsetId, adset_name: row.adsetName,
-          ad_id: row.adId, ad_name: row.adName, sub_id: row.subidNormalized,
-          spend: row.spend, impressions: row.impressions, clicks: row.clicks, raw_data: row.rawData,
-        })))
-        if (rawErr) {
-          console.error('insert raw_ads_rows error:', rawErr)
-          return NextResponse.json({ error: 'Loi insert raw_ads_rows: ' + rawErr.message, detail: rawErr }, { status: 500 })
-        }
+    const allRows = [...(result.rows || []), ...(result.errorRows || [])]
+    const batchSize = 200
+    let inserted = 0
+    let insertRowsErr: any = null
+    for (let i = 0; i < allRows.length; i += batchSize) {
+      const batch = allRows.slice(i, i + batchSize)
+      const payload = batch.map(row => ({
+        uploaded_file_id: uploadedFile.id,
+        row_index: row.rowIndex,
+        report_date: row.reportDate ? new Date(row.reportDate).toISOString() : reportDate,
+        campaign_id: row.campaignId,
+        campaign_name: row.campaignName,
+        adset_id: row.adsetId,
+        adset_name: row.adsetName,
+        ad_id: row.adId,
+        ad_name: row.adName,
+        sub_id: row.subidRaw,
+        spend: row.spend || 0,
+        impressions: row.impressions || 0,
+        clicks: row.clicks || 0,
+        raw_data: row.rawData || {},
+        parse_errors: (row.parseErrors && row.parseErrors.length) ? row.parseErrors.join('; ') : null,
+      }))
+      const { error: rawErr } = await supabaseAdmin.from('raw_ads_rows').insert(payload)
+      if (rawErr) {
+        insertRowsErr = rawErr
+        break
       }
-      for (let i = 0; i < result.rows.length; i += batchSize) {
-        const batch = result.rows.slice(i, i + batchSize)
-        const { error: upErr } = await supabaseAdmin.from('ads_daily_stats').upsert(batch.map(row => ({
-          report_date: row.reportDate, sub_id_raw: row.subidRaw ?? '',
-          sub_id_normalized: row.subidNormalized ?? '', tk_aff: row.tkAff,
-          campaign_id: row.campaignId, campaign_name: row.campaignName,
-          adset_id: row.adsetId, adset_name: row.adsetName,
-          ad_id: row.adId ?? '', ad_name: row.adName,
-          spend: row.spend, impressions: row.impressions, clicks: row.clicks,
-        })), { onConflict: 'report_date,ad_id,sub_id_raw', ignoreDuplicates: true })
-        if (upErr) {
-          console.error('upsert ads_daily_stats error:', upErr)
-          return NextResponse.json({ error: 'Loi upsert ads_daily_stats: ' + upErr.message, detail: upErr }, { status: 500 })
-        }
-      }
+      inserted += batch.length
     }
 
-    await supabaseAdmin.from('uploaded_files').update({ status: 'done' }).eq('id', uploadedFile.id)
+    if (insertRowsErr) {
+      console.error('insert raw_ads_rows error:', insertRowsErr)
+      await supabaseAdmin.from('uploaded_files').update({ status: 'error' }).eq('id', uploadedFile.id)
+      return NextResponse.json({
+        error: 'Loi khi luu raw_ads_rows: ' + insertRowsErr.message,
+        detail: insertRowsErr,
+        inserted,
+      }, { status: 500 })
+    }
+
+    await supabaseAdmin.from('uploaded_files').update({ status: 'parsed' }).eq('id', uploadedFile.id)
+
+    let normalizeStatus: any = null
+    try {
+      const origin = req.nextUrl.origin
+      const r = await fetch(`${origin}/api/normalize`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ uploadedFileId: uploadedFile.id, type: 'ads' }),
+      })
+      normalizeStatus = await r.json().catch(() => ({ ok: r.ok }))
+    } catch (e: any) {
+      normalizeStatus = { ok: false, error: String(e?.message || e) }
+    }
 
     return NextResponse.json({
-      success: true, uploadedFileId: uploadedFile.id,
-      totalRows: result.totalRows, savedRows: result.rows.length,
-      errorCount: result.errorCount, preview: result.preview.slice(0, 20),
-      columnMapping: result.columnMapping,
+      ok: true,
+      uploadedFileId: uploadedFile.id,
+      reportDate,
+      totalRows: result.totalRows,
+      errorCount: result.errorCount,
+      validCount: (result.totalRows || 0) - (result.errorCount || 0),
+      inserted,
+      preview: (result.preview || []).slice(0, 20),
+      columnMapping: result.columnMapping || {},
+      normalize: normalizeStatus,
     })
-  } catch (err: any) {
-    console.error('upload ads error:', err)
-    return NextResponse.json({ error: err?.message || 'Loi server', stack: err?.stack }, { status: 500 })
+  } catch (e: any) {
+    console.error('upload ads fatal:', e)
+    return NextResponse.json({ error: 'Loi khong xac dinh: ' + (e?.message || String(e)) }, { status: 500 })
   }
 }
