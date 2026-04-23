@@ -2,11 +2,11 @@
 import { useEffect, useState } from 'react'
 
 const SUGGESTION_OPTIONS = [
-  { value: 'INCREASE_20', label: 'Tang budget 20%' },
-  { value: 'DECREASE_20', label: 'Giam budget 20%' },
-  { value: 'PAUSE', label: 'Tat ads' },
-  { value: 'KEEP', label: 'Giu nguyen' },
-  { value: 'NO_ACTION', label: 'Khong hanh dong' },
+  { value: 'INCREASE_20', label: 'Tăng budget 20%' },
+  { value: 'DECREASE_20', label: 'Giảm budget 20%' },
+  { value: 'PAUSE', label: 'Tắt ads' },
+  { value: 'KEEP', label: 'Giữ nguyên' },
+  { value: 'NO_ACTION', label: 'Không hành động' },
 ]
 
 export default function QuyTacPage() {
@@ -43,11 +43,11 @@ export default function QuyTacPage() {
   }
 
   const SUGG_MAP: Record<string, { label: string; color: string }> = {
-    INCREASE_20: { label: 'Tang 20%', color: 'text-green-600' },
-    DECREASE_20: { label: 'Giam 20%', color: 'text-yellow-600' },
-    PAUSE: { label: 'Tat ads', color: 'text-red-600' },
-    KEEP: { label: 'Giu nguyen', color: 'text-blue-600' },
-    NO_ACTION: { label: 'Khong hanh dong', color: 'text-gray-400' },
+    INCREASE_20: { label: 'Tăng 20%', color: 'text-green-600' },
+    DECREASE_20: { label: 'Giảm 20%', color: 'text-yellow-600' },
+    PAUSE: { label: 'Tắt ads', color: 'text-red-600' },
+    KEEP: { label: 'Giữ nguyên', color: 'text-blue-600' },
+    NO_ACTION: { label: 'Không hành động', color: 'text-gray-400' },
   }
 
   return (
