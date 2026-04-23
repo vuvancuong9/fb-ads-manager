@@ -1,119 +1,183 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase-admin'
-import { parseAdsFile } from '@/lib/parser/ads-parser'
 import { createHash } from 'crypto'
+import { supabaseAdmin } from '@/lib/supabase-admin'
+import { parseAdsFile, AdsParsedRow } from '@/lib/parser/ads-parser'
+import { runNormalize, NormalizeResult } from '@/lib/services/normalize-service'
 
-export const maxDuration = 60
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
-function pickReportDate(rows: { reportDate: string | null }[]): string {
-  for (const r of rows) {
-    if (r && r.reportDate) {
-      const d = new Date(r.reportDate)
-      if (!isNaN(d.getTime())) return d.toISOString()
-    }
+/** Lay report_date moi nhat hop le trong file */
+function pickReportDate(rows: AdsParsedRow[]): string | null {
+  const valid = rows
+    .map(r => r.report_date)
+    .filter((d): d is string => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d))
+  if (valid.length === 0) return null
+  valid.sort()
+  return valid[valid.length - 1]
+}
+
+type RawPayload = Record<string, unknown>
+
+function buildRawPayload(
+  row: AdsParsedRow,
+  uploadedFileId: string,
+  includeAffFields: boolean
+): RawPayload {
+  const base: RawPayload = {
+    uploaded_file_id: uploadedFileId,
+    row_index: row.row_index,
+    report_date: row.report_date,
+    campaign_id: row.campaign_id,
+    campaign_name: row.campaign_name,
+    adset_id: row.adset_id,
+    adset_name: row.adset_name,
+    ad_id: row.ad_id,
+    ad_name: row.ad_name,
+    sub_id: row.sub_id,
+    spend: row.spend,
+    impressions: row.impressions,
+    clicks: row.clicks,
+    raw_data: row.raw_data,
+    parse_errors: row.parse_errors,
   }
-  return new Date().toISOString()
+  if (includeAffFields) {
+    base.subid_normalized = row.sub_id ? String(row.sub_id).toLowerCase() : null
+    base.tk_aff = row.tk_aff
+  }
+  return base
 }
 
 export async function POST(req: NextRequest) {
   try {
+    // 1) Nhan file
     const formData = await req.formData()
-    const file = formData.get('file') as File
-    if (!file) return NextResponse.json({ error: 'Khong co file' }, { status: 400 })
-    const buffer = Buffer.from(await file.arrayBuffer())
-    const fileHash = createHash('sha256').update(buffer).digest('hex')
-
-    const { data: existing, error: existingErr } = await supabaseAdmin
-      .from('uploaded_files').select('id').eq('file_hash', fileHash).maybeSingle()
-    if (existingErr) {
-      console.error('check existing error:', existingErr)
-      return NextResponse.json({ error: 'Khong kiem tra duoc file: ' + existingErr.message, detail: existingErr }, { status: 500 })
-    }
-    if (existing) {
-      return NextResponse.json({ error: 'File da duoc upload', uploadedFileId: existing.id }, { status: 409 })
+    const file = formData.get('file') as File | null
+    if (!file) {
+      return NextResponse.json({ error: 'Khong co file' }, { status: 400 })
     }
 
-    const result = parseAdsFile(buffer)
-    const reportDate = pickReportDate([...(result.rows || []), ...(result.errorRows || [])])
+    const arrayBuf = await file.arrayBuffer()
+    const buf = Buffer.from(arrayBuf)
 
-    const { data: uploadedFile, error: insertErr } = await supabaseAdmin.from('uploaded_files').insert({
-      file_name: file.name,
-      file_hash: fileHash,
-      file_type: 'ads',
-      report_date: reportDate,
-      row_count: result.totalRows,
-      error_count: result.errorCount,
-      status: 'processing',
-    }).select().single()
+    // 2) Hash file
+    const fileHash = createHash('sha256').update(buf).digest('hex')
 
-    if (insertErr || !uploadedFile) {
-      console.error('insert uploaded_file error:', insertErr)
-      return NextResponse.json({
-        error: 'Khong tao duoc uploaded_file record: ' + (insertErr?.message || 'unknown'),
-        detail: insertErr,
-        hint: insertErr?.hint,
-        code: insertErr?.code,
-      }, { status: 500 })
+    // 3) Check duplicate theo hash
+    const { data: existing } = await supabaseAdmin
+      .from('uploaded_files')
+      .select('id, file_name, file_hash, report_date, status, created_at')
+      .eq('file_hash', fileHash)
+      .eq('file_type', 'ads')
+      .maybeSingle()
+
+    if (existing?.id) {
+      return NextResponse.json(
+        {
+          ok: false,
+          duplicate: true,
+          uploadedFileId: existing.id,
+          fileName: existing.file_name,
+          reportDate: existing.report_date,
+          status: existing.status,
+          message: 'File da duoc upload truoc do',
+        },
+        { status: 409 }
+      )
     }
 
-    const allRows = [...(result.rows || []), ...(result.errorRows || [])]
-    const batchSize = 200
-    let inserted = 0
-    let insertRowsErr: any = null
-    for (let i = 0; i < allRows.length; i += batchSize) {
-      const batch = allRows.slice(i, i + batchSize)
-      const payload = batch.map(row => ({
-        uploaded_file_id: uploadedFile.id,
-        row_index: row.rowIndex,
-        report_date: row.reportDate ? new Date(row.reportDate).toISOString() : reportDate,
-        campaign_id: row.campaignId,
-        campaign_name: row.campaignName,
-        adset_id: row.adsetId,
-        adset_name: row.adsetName,
-        ad_id: row.adId,
-        ad_name: row.adName,
-        sub_id: row.subidRaw,
-        spend: row.spend || 0,
-        impressions: row.impressions || 0,
-        clicks: row.clicks || 0,
-        raw_data: row.rawData || {},
-        parse_errors: (row.parseErrors && row.parseErrors.length) ? row.parseErrors.join('; ') : null,
-      }))
-      const { error: rawErr } = await supabaseAdmin.from('raw_ads_rows').insert(payload)
-      if (rawErr) {
-        insertRowsErr = rawErr
-        break
-      }
-      inserted += batch.length
-    }
+    // 4) Parse file
+    const result = await parseAdsFile(arrayBuf, file.name)
+    const reportDate = pickReportDate(result.rows)
 
-    if (insertRowsErr) {
-      console.error('insert raw_ads_rows error:', insertRowsErr)
-      await supabaseAdmin.from('uploaded_files').update({ status: 'error' }).eq('id', uploadedFile.id)
-      return NextResponse.json({
-        error: 'Loi khi luu raw_ads_rows: ' + insertRowsErr.message,
-        detail: insertRowsErr,
-        inserted,
-      }, { status: 500 })
-    }
-
-    await supabaseAdmin.from('uploaded_files').update({ status: 'parsed' }).eq('id', uploadedFile.id)
-
-    let normalizeStatus: any = null
-    try {
-      const origin = req.nextUrl.origin
-      const r = await fetch(`${origin}/api/normalize`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ uploadedFileId: uploadedFile.id, type: 'ads' }),
+    // 5) Tao record uploaded_files
+    const { data: uploadedFile, error: ufErr } = await supabaseAdmin
+      .from('uploaded_files')
+      .insert({
+        file_name: file.name,
+        file_size: file.size,
+        file_hash: fileHash,
+        file_type: 'ads',
+        report_date: reportDate,
+        total_rows: result.totalRows,
+        error_count: result.errorCount,
+        status: 'uploading',
       })
-      normalizeStatus = await r.json().catch(() => ({ ok: r.ok }))
-    } catch (e: any) {
-      normalizeStatus = { ok: false, error: String(e?.message || e) }
+      .select('id')
+      .single()
+
+    if (ufErr || !uploadedFile) {
+      return NextResponse.json(
+        { error: 'Khong tao duoc uploaded_files: ' + (ufErr?.message || 'unknown') },
+        { status: 500 }
+      )
     }
 
+    // 6) Insert raw_ads_rows theo batch, co fallback neu schema thieu cot
+    const BATCH = 200
+    let inserted = 0
+    let includeAffFields = true
+
+    try {
+      for (let i = 0; i < result.rows.length; i += BATCH) {
+        const chunk = result.rows.slice(i, i + BATCH)
+        let payload = chunk.map(r => buildRawPayload(r, uploadedFile.id, includeAffFields))
+
+        let { error: insErr } = await supabaseAdmin.from('raw_ads_rows').insert(payload)
+
+        if (insErr && /subid_normalized|tk_aff|column .* does not exist/i.test(insErr.message)) {
+          includeAffFields = false
+          payload = chunk.map(r => buildRawPayload(r, uploadedFile.id, false))
+          const retry = await supabaseAdmin.from('raw_ads_rows').insert(payload)
+          insErr = retry.error
+        }
+
+        if (insErr) {
+          throw new Error(insErr.message)
+        }
+        inserted += chunk.length
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      await supabaseAdmin
+        .from('uploaded_files')
+        .update({ status: 'error', error_message: msg })
+        .eq('id', uploadedFile.id)
+
+      return NextResponse.json(
+        {
+          ok: false,
+          uploadedFileId: uploadedFile.id,
+          error: 'Loi luu raw_ads_rows: ' + msg,
+          inserted,
+          totalRows: result.totalRows,
+        },
+        { status: 500 }
+      )
+    }
+
+    // 7) Update status = parsed
+    await supabaseAdmin
+      .from('uploaded_files')
+      .update({ status: 'parsed' })
+      .eq('id', uploadedFile.id)
+
+    // 8) Normalize qua service (khong fetch noi bo)
+    let normalizeStatus: NormalizeResult
+    try {
+      normalizeStatus = await runNormalize({
+        uploadedFileId: uploadedFile.id,
+        type: 'ads',
+      })
+    } catch (e) {
+      normalizeStatus = {
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      }
+    }
+
+    // 9) Response day du
     return NextResponse.json({
       ok: true,
       uploadedFileId: uploadedFile.id,
@@ -126,8 +190,12 @@ export async function POST(req: NextRequest) {
       columnMapping: result.columnMapping || {},
       normalize: normalizeStatus,
     })
-  } catch (e: any) {
+  } catch (e) {
     console.error('upload ads fatal:', e)
-    return NextResponse.json({ error: 'Loi khong xac dinh: ' + (e?.message || String(e)) }, { status: 500 })
+    const msg = e instanceof Error ? e.message : String(e)
+    return NextResponse.json(
+      { error: 'Loi khong xac dinh: ' + msg },
+      { status: 500 }
+    )
   }
 }
