@@ -1,27 +1,37 @@
-import { prisma } from '@/lib/prisma'
-import { startOfDay, endOfDay } from 'date-fns'
+// Calculation Engine - Affiliate Ads Manager
+// Uses Supabase instead of Prisma
 
-export async function getLatestAdsDate(): Promise<Date | null> {
-  const r = await prisma.adsDailyStats.findFirst({
-    orderBy: { reportDate: 'desc' },
-    select: { reportDate: true },
-  })
-  return r?.reportDate ?? null
+import { supabaseAdmin } from '@/lib/supabase-admin'
+import { parseSubId, parseTkAff } from './rule-engine'
+
+export async function getLatestAdsDate(): Promise<string | null> {
+    const { data } = await supabaseAdmin
+      .from('ads_daily_stats')
+      .select('report_date')
+      .order('report_date', { ascending: false })
+      .limit(1)
+      .single()
+    return data?.report_date ?? null
 }
 
-export async function getActiveSubIds(latestDate: Date): Promise<Set<string>> {
-  const rows = await prisma.adsDailyStats.findMany({
-    where: {
-      reportDate: { gte: startOfDay(latestDate), lte: endOfDay(latestDate) },
-      spend: { gt: 0 },
-    },
-    select: { subIdNormalized: true },
-    distinct: ['subIdNormalized'],
-  })
-  return new Set(rows.map(r => r.subIdNormalized))
+export async function getActiveSubids(latestDate: string): Promise<Set<string>> {
+    const { data } = await supabaseAdmin
+      .from('ads_daily_stats')
+      .select('subid_normalized')
+      .gte('report_date', latestDate)
+      .lte('report_date', latestDate)
+      .gt('spend', 0)
+    return new Set((data ?? []).map((r: any) => r.subid_normalized))
 }
 
 export function calcRoi(commission: number, spend: number): number {
-  if (spend <= 0) return 0
-  return Math.round((commission / spend) * 100) / 100
+    if (spend <= 0) return 0
+    return Math.round((commission / spend) * 100) / 100
+}
+
+export function formatSubid(rawSubId: string): { normalized: string; tkAff: string | null } {
+    return {
+          normalized: parseSubId(rawSubId),
+          tkAff: parseTkAff(rawSubId),
+    }
 }
