@@ -1,19 +1,32 @@
-import { TK_AFF_PATTERNS } from './parser-config'
+// Sub ID Parser
+// Logic: if has "-" -> part after last "-", else keep as is
 
-export interface ParsedSubId { raw: string; normalized: string; tkAff: string | null }
-
-export function parseSubId(raw: string): ParsedSubId {
-  if (!raw) return { raw: '', normalized: '', tkAff: null }
-  const trimmed = raw.trim()
-  const normalized = trimmed.includes('-') ? trimmed.split('-').pop()!.trim() : trimmed
-  return { raw: trimmed, normalized, tkAff: detectTkAff(normalized) }
+export interface ParsedSubid {
+    raw: string
+    normalized: string
+    tkAff: string | null
 }
 
-export function detectTkAff(subId: string): string | null {
-  const sorted = [...TK_AFF_PATTERNS].sort((a, b) => b.priority - a.priority)
-  for (const { code, pattern } of sorted) {
-    if (pattern.test(subId)) return code
-  }
-  const match = subId.match(/^[0-9]{4}([A-Z]+)/i)
-  return match ? match[1].toUpperCase() : null
+export function parseSubId(raw: string): string {
+    if (!raw) return ''
+    const trimmed = raw.trim()
+    if (trimmed.includes('-')) {
+          return trimmed.split('-').pop()!.trim()
+    }
+    return trimmed
+}
+
+export function parseTkAff(raw: string): string | null {
+    if (!raw) return null
+    const trimmed = raw.trim()
+    const parts = trimmed.split('-')
+    if (parts.length > 1) {
+          return parts.slice(0, parts.length - 1).join('-').trim() || null
+    }
+    return null
+}
+
+export function parseSubidFull(raw: string): ParsedSubid {
+    const trimmed = (raw || '').trim()
+    return { raw: trimmed, normalized: parseSubId(trimmed), tkAff: parseTkAff(trimmed) }
 }
