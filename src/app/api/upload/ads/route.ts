@@ -21,7 +21,7 @@ import { runNormalize, NormalizeResult } from '@/lib/services/normalize-service'
 import { createLogger } from '@/lib/logger'
 import {
       ok,
-      badRequest,h
+      badRequest,
       unauthorized,
       conflict,
       tooLarge,
