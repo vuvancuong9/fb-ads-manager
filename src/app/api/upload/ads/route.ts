@@ -21,7 +21,7 @@ import { runNormalize, NormalizeResult } from '@/lib/services/normalize-service'
 import { createLogger } from '@/lib/logger'
 import {
       ok,
-      badRequest,
+      badRequest,h
       unauthorized,
       conflict,
       tooLarge,
@@ -219,7 +219,7 @@ export async function POST(req: NextRequest) {
             .select('id, status')
             .eq('file_hash', fileHash)
             .eq('user_id', userId)
-            .in('status', ['uploading', 'processing'])
+            .in('status', ['processing'])
             .maybeSingle()
 
         if (inFlight) {
@@ -235,19 +235,21 @@ export async function POST(req: NextRequest) {
   try {
           const { data: existingByHash } = await supabaseAdmin
             .from('uploaded_files')
-            .select('id, status, report_date')
+            .select('id, status, report_date, created_at')
             .eq('file_hash', fileHash)
             .eq('user_id', userId)
-            .in('status', ['completed', 'normalized', 'parsed'])
+            .in('status', ['completed', 'normalized'])
             .maybeSingle()
 
         if (existingByHash) {
                   if (!forceReplace) {
                               log.info('POST /api/upload/ads: duplicate hash, returning existing', { fileId: existingByHash.id })
                               return conflict('File nay da duoc upload truoc do', {
-                                            duplicate: true,
+                            code: 'DUPLICATE_FILE',
+                                    duplicate: true,
                                             uploadedFileId: existingByHash.id,
                                             reportDate: existingByHash.report_date,
+                                    status: existingByHash.status,
                               })
                   }
                   log.info('POST /api/upload/ads: forceReplace=true, deleting old upload by hash', { fileId: existingByHash.id })
@@ -290,7 +292,8 @@ export async function POST(req: NextRequest) {
                         if (!forceReplace) {
                                       log.info('POST /api/upload/ads: duplicate report_date', { fileId: existingByDate.id, reportDate })
                                       return conflict('Da co file cho ngay bao cao nay', {
-                                                      duplicate: true,
+                                                      code: 'DUPLICATE_FILE',
+                                            duplicate: true,
                                                       uploadedFileId: existingByDate.id,
                                                       reportDate,
                                       })
