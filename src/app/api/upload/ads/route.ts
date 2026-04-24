@@ -8,7 +8,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-/** Lay report_date moi nhat hop le trong tat ca rows */
+/** Lay report_date moi nhat hop le trong file */
 function pickReportDate(rows: AdsParsedRow[]): string | null {
   const valid = rows
     .map((r) => r.report_date)
@@ -17,7 +17,7 @@ function pickReportDate(rows: AdsParsedRow[]): string | null {
   return valid.sort().at(-1) ?? null
 }
 
-/** Build insert payload for raw_ads_rows — schema does NOT have subid_normalized/tk_aff */
+/** Build insert payload for raw_ads_rows */
 function buildRawPayload(row: AdsParsedRow, uploadedFileId: string): Record<string, unknown> {
   return {
     uploaded_file_id: uploadedFileId,
@@ -30,6 +30,8 @@ function buildRawPayload(row: AdsParsedRow, uploadedFileId: string): Record<stri
     ad_id: row.ad_id,
     ad_name: row.ad_name,
     sub_id: row.sub_id,
+    subid_normalized: row.sub_id ? row.sub_id.toLowerCase().replace(/[^a-z0-9]/g, '') : null,
+    tk_aff: row.tk_aff,
     spend: row.spend,
     impressions: row.impressions,
     clicks: row.clicks,
@@ -38,33 +40,52 @@ function buildRawPayload(row: AdsParsedRow, uploadedFileId: string): Record<stri
   }
 }
 
+/** Xoa du lieu cu cua mot uploaded_file de cho phep re-import */
+async function deleteExistingUpload(existingId: string): Promise<void> {
+  await supabaseAdmin.from('raw_ads_rows').delete().eq('uploaded_file_id', existingId)
+  await supabaseAdmin.from('uploaded_files').delete().eq('id', existingId)
+}
+
 export async function POST(req: NextRequest) {
   try {
     // 1) Nhan file
     const formData = await req.formData()
     const file = formData.get('file') as File | null
+    const forceReplace = formData.get('forceReplace') === 'true'
     if (!file) return NextResponse.json({ error: 'Khong co file' }, { status: 400 })
 
     const arrayBuf = await file.arrayBuffer()
     const buf = Buffer.from(arrayBuf)
     const fileHash = createHash('sha256').update(buf).digest('hex')
 
-    // 2) Kiem tra trung file (hash)
+    // 2) Kiem tra trung file hash
     const { data: existing } = await supabaseAdmin
       .from('uploaded_files')
-      .select('id, file_name, report_date, status')
+      .select('id, file_name, file_hash, report_date, status, created_at')
       .eq('file_hash', fileHash)
       .eq('file_type', 'ads')
       .maybeSingle()
 
     if (existing?.id) {
-      return NextResponse.json(
-        { ok: false, duplicate: true, uploadedFileId: existing.id, fileName: existing.file_name, reportDate: existing.report_date, status: existing.status, message: 'File da duoc upload' },
-        { status: 409 }
-      )
+      if (!forceReplace) {
+        // Tra 409 voi thong bao ro rang
+        return NextResponse.json(
+          {
+            ok: false,
+            code: 'DUPLICATE_FILE',
+            message: 'File nay da duoc upload truoc do',
+            uploadedFileId: existing.id,
+            existingStatus: existing.status,
+            existingCreatedAt: existing.created_at,
+          },
+          { status: 409 }
+        )
+      }
+      // forceReplace=true: xoa du lieu cu
+      await deleteExistingUpload(existing.id)
     }
 
-    // 3) Parse
+    // 3) Parse file
     const result = await parseAdsFile(arrayBuf, file.name)
     const reportDate = pickReportDate(result.rows)
 
@@ -85,7 +106,10 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (ufErr || !uf) {
-      return NextResponse.json({ error: 'Khong tao duoc uploaded_files: ' + (ufErr?.message ?? 'unknown') }, { status: 500 })
+      return NextResponse.json(
+        { ok: false, error: 'Khong tao duoc uploaded_files: ' + (ufErr?.message ?? 'unknown') },
+        { status: 500 }
+      )
     }
 
     // 5) Batch insert raw_ads_rows
@@ -102,9 +126,12 @@ export async function POST(req: NextRequest) {
       const msg = e instanceof Error ? e.message : String(e)
       await supabaseAdmin
         .from('uploaded_files')
-        .update({ status: 'error', raw_path: msg })
+        .update({ status: 'error', error_message: msg })
         .eq('id', uf.id)
-      return NextResponse.json({ ok: false, uploadedFileId: uf.id, error: 'Loi raw insert: ' + msg, inserted }, { status: 500 })
+      return NextResponse.json(
+        { ok: false, uploadedFileId: uf.id, error: 'Loi luu raw: ' + msg, inserted },
+        { status: 500 }
+      )
     }
 
     // 6) Status = parsed
@@ -119,7 +146,10 @@ export async function POST(req: NextRequest) {
       await supabaseAdmin.from('uploaded_files').update({ status: finalStatus }).eq('id', uf.id)
     } catch (e) {
       normalizeStatus = { ok: false, error: e instanceof Error ? e.message : String(e) }
-      await supabaseAdmin.from('uploaded_files').update({ status: 'error', raw_path: normalizeStatus.error }).eq('id', uf.id)
+      await supabaseAdmin
+        .from('uploaded_files')
+        .update({ status: 'error', error_message: normalizeStatus.error })
+        .eq('id', uf.id)
     }
 
     // 8) Response day du
@@ -137,6 +167,9 @@ export async function POST(req: NextRequest) {
     })
   } catch (e) {
     console.error('upload ads fatal:', e)
-    return NextResponse.json({ error: 'Loi khong xac dinh: ' + (e instanceof Error ? e.message : String(e)) }, { status: 500 })
+    return NextResponse.json(
+      { ok: false, error: 'Loi khong xac dinh: ' + (e instanceof Error ? e.message : String(e)) },
+      { status: 500 }
+    )
   }
 }
