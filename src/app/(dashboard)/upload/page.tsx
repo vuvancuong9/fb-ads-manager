@@ -1,5 +1,6 @@
 'use client'
 import { useState, useRef } from 'react'
+import { createClient } from '@/lib/supabase/client'
 
 type UploadType = 'ads' | 'orders'
 type UploadStatus = 'idle' | 'uploading' | 'done' | 'error' | 'duplicate'
@@ -47,7 +48,10 @@ function Card({ title, type }: { title: string; type: UploadType }) {
       fd.append('file', file)
       if (forceReplace) fd.append('forceReplace', 'true')
 
-      const r = await fetch(`/api/upload/${type}`, { method: 'POST', body: fd })
+              const supabase = createClient()
+              const { data: { session } } = await supabase.auth.getSession()
+              const authHeader = session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}
+      const r = await fetch(`/api/upload/${type}`, { method: 'POST', body: fd, headers: authHeader })
       const j: any = await r.json().catch(() => ({ error: 'Khong doc duoc phan hoi' }))
 
       if (r.status === 409 && j.code === 'DUPLICATE_FILE') {
