@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx'
 import Papa from 'papaparse'
 
-export type AdsParsedRow = {
+export interface AdsParsedRow {
   row_index: number
   report_date: string | null
   campaign_id: string | null
@@ -19,7 +19,7 @@ export type AdsParsedRow = {
   parse_errors: string[]
 }
 
-export type AdsParseResult = {
+export interface AdsParseResult {
   totalRows: number
   errorCount: number
   rows: AdsParsedRow[]
@@ -28,28 +28,30 @@ export type AdsParseResult = {
   headersDetected: string[]
 }
 
-/** Strip accents + lowercase + collapse spaces */
+/** Strip diacritics + lowercase + collapse whitespace */
 function normalizeKey(s: string): string {
   return String(s || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\u0111/gi, 'd')
+    .replace(/[\u0111\u0110]/gi, 'd')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
 }
 
-/** Find first header matching any alias (exact then substring match on normalized key) */
+/** Find header by exact then substring match on normalized key */
 function findCol(headers: string[], aliases: string[]): string | null {
-  const normHeaders = headers.map(h => ({ raw: h, norm: normalizeKey(h) }))
+  const normHeaders = headers.map((h) => ({ raw: h, norm: normalizeKey(h) }))
+  // exact match first
   for (const alias of aliases) {
     const a = normalizeKey(alias)
-    const hit = normHeaders.find(h => h.norm === a)
+    const hit = normHeaders.find((h) => h.norm === a)
     if (hit) return hit.raw
   }
+  // substring match
   for (const alias of aliases) {
     const a = normalizeKey(alias)
-    const hit = normHeaders.find(h => h.norm.includes(a))
+    const hit = normHeaders.find((h) => h.norm.includes(a))
     if (hit) return hit.raw
   }
   return null
@@ -59,12 +61,14 @@ const ALIAS: Record<string, string[]> = {
   report_date: [
     'luot bat dau bao cao',
     'ngay bat dau bao cao',
+    'bat dau bao cao',
     'reporting starts',
     'report date',
     'date',
     'ngay',
     'ngay bao cao',
     'luot ket thuc bao cao',
+    'ket thuc bao cao',
     'reporting ends',
   ],
   campaign_id: ['campaign id', 'ma chien dich', 'id chien dich'],
@@ -82,7 +86,7 @@ const ALIAS: Record<string, string[]> = {
     'chi tieu',
     'spend',
   ],
-  impressions: ['luot hien thi', 'impressions', 'hien thi'],
+  impressions: ['luot hien thi', 'impressions', 'hien thi', 'tien do phien'],
   clicks: [
     'luot click vao lien ket',
     'link clicks',
@@ -92,17 +96,15 @@ const ALIAS: Record<string, string[]> = {
   ],
 }
 
-/** Parse dates like "4-Jan", "4/1/2026", "2026-01-04", Excel serial number */
+/** Parse date from various formats: Excel serial, "4-Jan", "4/1/2026", ISO */
 function parseDateStr(v: unknown): string | null {
   if (v == null || v === '') return null
 
-  // Excel serial date
+  // Excel serial number
   if (typeof v === 'number' && isFinite(v) && v > 20000 && v < 80000) {
     const d = XLSX.SSF.parse_date_code(v)
     if (d) {
-      const mm = String(d.m).padStart(2, '0')
-      const dd = String(d.d).padStart(2, '0')
-      return `${d.y}-${mm}-${dd}`
+      return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`
     }
   }
 
@@ -113,15 +115,15 @@ function parseDateStr(v: unknown): string | null {
   let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
   if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
 
-  // d/m/yyyy (VN format)
+  // d/m/yyyy or m/d/yyyy — assume d/m/yyyy (VN format)
   m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/)
   if (m) {
     let y = parseInt(m[3], 10)
     if (y < 100) y += 2000
-    const d = parseInt(m[1], 10)
+    const dd = parseInt(m[1], 10)
     const mo = parseInt(m[2], 10)
-    if (d >= 1 && d <= 31 && mo >= 1 && mo <= 12) {
-      return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    if (dd >= 1 && dd <= 31 && mo >= 1 && mo <= 12) {
+      return `${y}-${String(mo).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
     }
   }
 
@@ -132,21 +134,19 @@ function parseDateStr(v: unknown): string | null {
   }
   m = s.toLowerCase().match(/^(\d{1,2})[\s\-]+([a-z]{3,})/)
   if (m) {
-    const d = parseInt(m[1], 10)
+    const dd = parseInt(m[1], 10)
     const mo = MONTHS[m[2].slice(0, 3)]
-    if (d && mo) {
+    if (dd && mo) {
       const y = new Date().getFullYear()
-      return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+      return `${y}-${String(mo).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
     }
   }
 
   // Fallback: Date.parse
   const t = Date.parse(s)
   if (!isNaN(t)) {
-    const d = new Date(t)
-    const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
-    const dd = String(d.getUTCDate()).padStart(2, '0')
-    return `${d.getUTCFullYear()}-${mm}-${dd}`
+    const dt = new Date(t)
+    return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`
   }
 
   return null
@@ -155,7 +155,7 @@ function parseDateStr(v: unknown): string | null {
 function toNum(v: unknown): number | null {
   if (v == null || v === '') return null
   if (typeof v === 'number') return isFinite(v) ? v : null
-  const s = String(v).replace(/[,\s]/g, '').replace(/[^\d\.\-]/g, '')
+  const s = String(v).replace(/[,\s]/g, '').replace(/[^\d.\-]/g, '')
   if (!s) return null
   const n = parseFloat(s)
   return isFinite(n) ? n : null
@@ -167,45 +167,33 @@ function toStr(v: unknown): string | null {
   return s === '' ? null : s
 }
 
-function readWorkbookFromBuffer(buf: ArrayBuffer, filename: string): Record<string, unknown>[] {
+function readRawRows(buf: ArrayBuffer, filename: string): Record<string, unknown>[] {
   const lower = filename.toLowerCase()
   if (lower.endsWith('.csv')) {
     const text = new TextDecoder('utf-8').decode(buf)
-    const parsed = Papa.parse<Record<string, unknown>>(text, {
+    const result = Papa.parse<Record<string, unknown>>(text, {
       header: true,
       skipEmptyLines: true,
     })
-    return (parsed.data || []) as Record<string, unknown>[]
+    return result.data
   }
   const wb = XLSX.read(buf, { type: 'array', cellDates: false })
-  const sheetName = wb.SheetNames[0]
-  const ws = wb.Sheets[sheetName]
-  const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
-    defval: null,
-    raw: true,
-  })
-  return json
+  const ws = wb.Sheets[wb.SheetNames[0]]
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null, raw: true })
 }
 
 export async function parseAdsFile(
   fileBuffer: ArrayBuffer,
   filename: string
 ): Promise<AdsParseResult> {
-  const rowsRaw = readWorkbookFromBuffer(fileBuffer, filename)
-  const totalRows = rowsRaw.length
+  const rawRows = readRawRows(fileBuffer, filename)
+  const totalRows = rawRows.length
 
   if (totalRows === 0) {
-    return {
-      totalRows: 0,
-      errorCount: 0,
-      rows: [],
-      preview: [],
-      columnMapping: {},
-      headersDetected: [],
-    }
+    return { totalRows: 0, errorCount: 0, rows: [], preview: [], columnMapping: {}, headersDetected: [] }
   }
 
-  const headers = Object.keys(rowsRaw[0] || {})
+  const headers = Object.keys(rawRows[0])
   const mapping: Record<string, string | null> = {
     report_date: findCol(headers, ALIAS.report_date),
     campaign_id: findCol(headers, ALIAS.campaign_id),
@@ -223,8 +211,8 @@ export async function parseAdsFile(
   const rows: AdsParsedRow[] = []
   let errorCount = 0
 
-  for (let i = 0; i < rowsRaw.length; i++) {
-    const r = rowsRaw[i]
+  for (let i = 0; i < rawRows.length; i++) {
+    const r = rawRows[i]
     const errs: string[] = []
 
     const report_date = mapping.report_date ? parseDateStr(r[mapping.report_date]) : null
@@ -233,13 +221,12 @@ export async function parseAdsFile(
     const campaign_name = mapping.campaign_name ? toStr(r[mapping.campaign_name]) : null
     const ad_name = mapping.ad_name ? toStr(r[mapping.ad_name]) : null
 
-    const tryExtract = (s: string | null): string | null => {
+    // Extract sub_id pattern from campaign name or ad name
+    const extractSubId = (s: string | null): string | null => {
       if (!s) return null
-      const m = s.match(/([A-Z0-9]{4,})/i)
-      return m ? m[1] : null
+      const matched = s.match(/([A-Z0-9]{4,})/i)
+      return matched ? matched[1] : null
     }
-    const sub_id = tryExtract(campaign_name) || tryExtract(ad_name)
-    const tk_aff = mapping.account_name ? toStr(r[mapping.account_name]) : null
 
     const row: AdsParsedRow = {
       row_index: i,
@@ -250,8 +237,8 @@ export async function parseAdsFile(
       adset_name: mapping.adset_name ? toStr(r[mapping.adset_name]) : null,
       ad_id: mapping.ad_id ? toStr(r[mapping.ad_id]) : null,
       ad_name,
-      sub_id,
-      tk_aff,
+      sub_id: extractSubId(campaign_name) || extractSubId(ad_name),
+      tk_aff: mapping.account_name ? toStr(r[mapping.account_name]) : null,
       spend: mapping.spend ? toNum(r[mapping.spend]) : null,
       impressions: mapping.impressions ? toNum(r[mapping.impressions]) : null,
       clicks: mapping.clicks ? toNum(r[mapping.clicks]) : null,
