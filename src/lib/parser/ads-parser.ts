@@ -11,6 +11,7 @@ export interface AdsParsedRow {
   ad_id: string | null
   ad_name: string | null
   sub_id: string | null
+  subidNormalized: string | null
   tk_aff: string | null
   spend: number | null
   impressions: number | null
@@ -42,13 +43,11 @@ function normalizeKey(s: string): string {
 /** Find header by exact then substring match on normalized key */
 function findCol(headers: string[], aliases: string[]): string | null {
   const normHeaders = headers.map((h) => ({ raw: h, norm: normalizeKey(h) }))
-  // exact match first
   for (const alias of aliases) {
     const a = normalizeKey(alias)
     const hit = normHeaders.find((h) => h.norm === a)
     if (hit) return hit.raw
   }
-  // substring match
   for (const alias of aliases) {
     const a = normalizeKey(alias)
     const hit = normHeaders.find((h) => h.norm.includes(a))
@@ -101,28 +100,43 @@ function parseDateStr(v: unknown): string | null {
   if (v == null || v === '') return null
 
   // Excel serial number
-  if (typeof v === 'number' && isFinite(v) && v > 20000 && v < 80000) {
-    const d = XLSX.SSF.parse_date_code(v)
-    if (d) {
-      return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`
+  if (typeof v === 'number') {
+    if (v > 1000 && v < 60000) {
+      const d = XLSX.SSF.parse_date_code(v)
+      if (d) {
+        const y = d.y
+        const mo = String(d.m).padStart(2, '0')
+        const dd = String(d.d).padStart(2, '0')
+        return `${y}-${mo}-${dd}`
+      }
     }
+    return null
   }
 
   const s = String(v).trim()
   if (!s) return null
 
-  // ISO yyyy-mm-dd
+  // ISO: 2026-01-04
   let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
-  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
-
-  // d/m/yyyy or m/d/yyyy — assume d/m/yyyy (VN format)
-  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/)
   if (m) {
-    let y = parseInt(m[3], 10)
-    if (y < 100) y += 2000
-    const dd = parseInt(m[1], 10)
+    const y = parseInt(m[1], 10)
     const mo = parseInt(m[2], 10)
-    if (dd >= 1 && dd <= 31 && mo >= 1 && mo <= 12) {
+    const dd = parseInt(m[3], 10)
+    if (y > 2000 && mo >= 1 && mo <= 12 && dd >= 1 && dd <= 31) {
+      return `${y}-${String(mo).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
+    }
+  }
+
+  // d/m/yyyy or m/d/yyyy - e.g. "4/1/2026"
+  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/)
+  if (m) {
+    const a = parseInt(m[1], 10)
+    const b = parseInt(m[2], 10)
+    const y = parseInt(m[3], 10)
+    // Prefer d/m/yyyy (Vietnamese format)
+    const dd = a
+    const mo = b
+    if (mo >= 1 && mo <= 12 && dd >= 1 && dd <= 31) {
       return `${y}-${String(mo).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
     }
   }
@@ -136,8 +150,8 @@ function parseDateStr(v: unknown): string | null {
   if (m) {
     const dd = parseInt(m[1], 10)
     const mo = MONTHS[m[2].slice(0, 3)]
-    if (dd && mo) {
-      const y = new Date().getFullYear()
+    if (mo && dd >= 1 && dd <= 31) {
+      const y = new Date().getUTCFullYear()
       return `${y}-${String(mo).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
     }
   }
@@ -167,6 +181,29 @@ function toStr(v: unknown): string | null {
   return s === '' ? null : s
 }
 
+/**
+ * Dem so alias match cua mot row headers voi ALIAS map
+ * De detect header row that su khi FB export co nhieu dong header
+ */
+function countAliasMatches(candidates: string[]): number {
+  const normCandidates = candidates.map(normalizeKey)
+  let score = 0
+  for (const aliases of Object.values(ALIAS)) {
+    for (const alias of aliases) {
+      const a = normalizeKey(alias)
+      if (normCandidates.some((c) => c === a || c.includes(a))) {
+        score++
+        break
+      }
+    }
+  }
+  return score
+}
+
+/**
+ * Doc raw rows tu Excel, tu dong detect header row that su
+ * De xu ly file Facebook co nhieu dong header (header + sub-header)
+ */
 function readRawRows(buf: ArrayBuffer, filename: string): Record<string, unknown>[] {
   const lower = filename.toLowerCase()
   if (lower.endsWith('.csv')) {
@@ -177,9 +214,60 @@ function readRawRows(buf: ArrayBuffer, filename: string): Record<string, unknown
     })
     return result.data
   }
+
   const wb = XLSX.read(buf, { type: 'array', cellDates: false })
   const ws = wb.Sheets[wb.SheetNames[0]]
-  return XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null, raw: true })
+
+  // Doc tat ca duoi dang array 2D de detect header row that su
+  const allRows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: null })
+
+  if (allRows.length === 0) return []
+
+  // Tim header row: la dong co nhieu alias match nhat
+  // Thuong la dong dau tien, nhung FB co the co 2-3 dong header
+  let bestRowIdx = 0
+  let bestScore = -1
+  for (let i = 0; i < Math.min(5, allRows.length); i++) {
+    const row = allRows[i] as unknown[]
+    const cells = row.map((c) => String(c ?? ''))
+    const score = countAliasMatches(cells)
+    if (score > bestScore) {
+      bestScore = score
+      bestRowIdx = i
+    }
+  }
+
+  // Build header array tu header row
+  const headerRow = allRows[bestRowIdx] as unknown[]
+  const headers = headerRow.map((c) => String(c ?? '').trim())
+
+  // Build objects tu cac data rows (sau header row)
+  const result: Record<string, unknown>[] = []
+  for (let i = bestRowIdx + 1; i < allRows.length; i++) {
+    const row = allRows[i] as unknown[]
+    // Skip row neu tat ca cell deu null hoac empty
+    const hasData = row.some((c) => c != null && String(c).trim() !== '')
+    if (!hasData) continue
+
+    const obj: Record<string, unknown> = {}
+    for (let j = 0; j < headers.length; j++) {
+      const key = headers[j]
+      if (key) obj[key] = j < row.length ? row[j] : null
+    }
+    result.push(obj)
+  }
+
+  return result
+}
+
+/** Pick report date: lay ngay hop le moi nhat trong file */
+function pickReportDate(rows: AdsParsedRow[]): string | null {
+  const dates = rows
+    .map((r) => r.report_date)
+    .filter((d): d is string => d !== null)
+    .sort()
+    .reverse()
+  return dates[0] ?? null
 }
 
 export async function parseAdsFile(
@@ -221,12 +309,17 @@ export async function parseAdsFile(
     const campaign_name = mapping.campaign_name ? toStr(r[mapping.campaign_name]) : null
     const ad_name = mapping.ad_name ? toStr(r[mapping.ad_name]) : null
 
-    // Extract sub_id pattern from campaign name or ad name
+    // Extract sub_id: lay pattern tu campaign_name hoac ad_name
     const extractSubId = (s: string | null): string | null => {
       if (!s) return null
       const matched = s.match(/([A-Z0-9]{4,})/i)
       return matched ? matched[1] : null
     }
+
+    const sub_id = extractSubId(campaign_name) || extractSubId(ad_name)
+    const subidNormalized = sub_id
+      ? sub_id.toLowerCase().replace(/[^a-z0-9]/g, '')
+      : null
 
     const row: AdsParsedRow = {
       row_index: i,
@@ -237,7 +330,8 @@ export async function parseAdsFile(
       adset_name: mapping.adset_name ? toStr(r[mapping.adset_name]) : null,
       ad_id: mapping.ad_id ? toStr(r[mapping.ad_id]) : null,
       ad_name,
-      sub_id: extractSubId(campaign_name) || extractSubId(ad_name),
+      sub_id,
+      subidNormalized,
       tk_aff: mapping.account_name ? toStr(r[mapping.account_name]) : null,
       spend: mapping.spend ? toNum(r[mapping.spend]) : null,
       impressions: mapping.impressions ? toNum(r[mapping.impressions]) : null,
@@ -259,3 +353,5 @@ export async function parseAdsFile(
     headersDetected: headers,
   }
 }
+
+export { pickReportDate }
