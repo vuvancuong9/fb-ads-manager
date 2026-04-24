@@ -12,7 +12,7 @@ function buildRawPayload(row: AdsParsedRow, uploadedFileId: string): Record<stri
   return {
     uploaded_file_id: uploadedFileId,
     row_index: row.row_index,
-    report_date: row.report_date,
+    report_date: row.report_date,   // Nullable after migration
     campaign_id: row.campaign_id,
     campaign_name: row.campaign_name,
     adset_id: row.adset_id,
@@ -26,7 +26,7 @@ function buildRawPayload(row: AdsParsedRow, uploadedFileId: string): Record<stri
     impressions: row.impressions,
     clicks: row.clicks,
     raw_data: row.raw_data,
-    parse_errors: row.parse_errors.join('|') || null,
+    parse_errors: row.parse_errors.length > 0 ? row.parse_errors.join(' | ') : null,
   }
 }
 
@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
     const buf = Buffer.from(arrayBuf)
     const fileHash = createHash('sha256').update(buf).digest('hex')
 
+    // Kiem tra trung file hash
     const { data: existing } = await supabaseAdmin
       .from('uploaded_files')
       .select('id, file_name, file_hash, report_date, status, created_at')
@@ -74,17 +75,18 @@ export async function POST(req: NextRequest) {
     const result = await parseAdsFile(arrayBuf, file.name)
     const reportDate = pickReportDate(result.rows)
 
-    // Log debug info neu co nhieu loi
+    // Log debug info khi co nhieu loi
     if (result.errorCount > 0) {
       console.log('[upload/ads] columnMapping:', JSON.stringify(result.columnMapping))
       console.log('[upload/ads] headersDetected:', JSON.stringify(result.headersDetected))
       console.log('[upload/ads] errorCount:', result.errorCount, '/', result.totalRows)
       if (result.rows.length > 0) {
-        console.log('[upload/ads] first row parse_errors:', result.rows[0].parse_errors)
-        console.log('[upload/ads] first row report_date:', result.rows[0].report_date)
+        console.log('[upload/ads] row0 parse_errors:', result.rows[0].parse_errors)
+        console.log('[upload/ads] row0 report_date:', result.rows[0].report_date)
       }
     }
 
+    // Tao uploaded_files record
     const { data: uf, error: ufErr } = await supabaseAdmin
       .from('uploaded_files')
       .insert({
@@ -92,7 +94,7 @@ export async function POST(req: NextRequest) {
         file_size: file.size,
         file_hash: fileHash,
         file_type: 'ads',
-        report_date: reportDate,
+        report_date: reportDate,   // Nullable - ok sau migration
         row_count: result.totalRows,
         error_count: result.errorCount,
         status: 'uploading',
@@ -101,9 +103,14 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (ufErr || !uf) {
-      return NextResponse.json({ ok: false, error: 'Loi tao uploaded_files: ' + ufErr?.message }, { status: 500 })
+      console.error('[upload/ads] insert uploaded_files error:', ufErr?.message)
+      return NextResponse.json(
+        { ok: false, error: 'Loi tao uploaded_files: ' + ufErr?.message },
+        { status: 500 }
+      )
     }
 
+    // Insert raw rows theo batch
     let inserted = 0
     const BATCH = 500
 
@@ -116,6 +123,7 @@ export async function POST(req: NextRequest) {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
+      console.error('[upload/ads] insert raw_ads_rows error:', msg)
       await supabaseAdmin
         .from('uploaded_files')
         .update({ status: 'error', error_message: msg })
@@ -126,8 +134,10 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Update status = parsed
     await supabaseAdmin.from('uploaded_files').update({ status: 'parsed' }).eq('id', uf.id)
 
+    // Normalize truc tiep (khong fetch noi bo)
     let normalizeStatus: NormalizeResult = { ok: true }
     try {
       await supabaseAdmin.from('uploaded_files').update({ status: 'processing' }).eq('id', uf.id)
@@ -136,6 +146,7 @@ export async function POST(req: NextRequest) {
       await supabaseAdmin.from('uploaded_files').update({ status: finalStatus }).eq('id', uf.id)
     } catch (e) {
       normalizeStatus = { ok: false, error: e instanceof Error ? e.message : String(e) }
+      console.error('[upload/ads] normalize error:', normalizeStatus.error)
       await supabaseAdmin
         .from('uploaded_files')
         .update({ status: 'error', error_message: normalizeStatus.error })
@@ -156,7 +167,7 @@ export async function POST(req: NextRequest) {
       normalize: normalizeStatus,
     })
   } catch (e) {
-    console.error('upload ads fatal:', e)
+    console.error('[upload/ads] fatal:', e)
     return NextResponse.json(
       { ok: false, error: 'Loi khong xac dinh: ' + (e instanceof Error ? e.message : String(e)) },
       { status: 500 }

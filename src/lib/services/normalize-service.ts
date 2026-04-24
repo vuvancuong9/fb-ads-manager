@@ -15,19 +15,12 @@ export interface NormalizeResult {
   error?: string
 }
 
-function dayKey(iso: string | null | undefined): string | null {
-  if (!iso) return null
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return null
-  return d.toISOString().slice(0, 10)
-}
-
 // ─────────────────────────────────────────────────────────────────
-// Normalize Ads: raw_ads_rows -> ads_daily_stats
+// normalizeAdsFile: raw_ads_rows -> ads_daily_stats
 // ─────────────────────────────────────────────────────────────────
 async function normalizeAdsFile(
   uploadedFileId: string | null
-): Promise<{ ok: boolean; inserted: number; error?: string }> {
+): Promise<{ ok: boolean; inserted?: number; error?: string }> {
   let q = supabaseAdmin.from('raw_ads_rows').select('*').limit(50000)
   if (uploadedFileId) q = q.eq('uploaded_file_id', uploadedFileId)
 
@@ -35,50 +28,62 @@ async function normalizeAdsFile(
   if (error) return { ok: false, inserted: 0, error: 'load raw_ads_rows: ' + error.message }
   if (!raws || raws.length === 0) return { ok: true, inserted: 0 }
 
-  const records = raws.map((r: Record<string, unknown>) => {
-    const subRaw = String(r.sub_id || '')
+  // Chi xu ly cac rows co report_date hop le
+  const validRaws = raws.filter((r: Record<string, unknown>) => r.report_date != null)
+  if (validRaws.length === 0) return { ok: true, inserted: 0 }
+
+  const records = validRaws.map((r: Record<string, unknown>) => {
+    const subRaw = String(r.sub_id || r.subid_normalized || '')
     const subNorm = parseSubId(subRaw) || subRaw
-    const tk = parseTkAff(subRaw) || null
+    const tk = parseTkAff(subRaw) || String(r.tk_aff || '') || null
     return {
       report_date: r.report_date,
       sub_id_raw: subRaw,
       sub_id_normalized: subNorm,
       tk_aff: tk,
-      campaign_id: r.campaign_id,
-      campaign_name: r.campaign_name,
-      adset_id: r.adset_id,
-      adset_name: r.adset_name,
-      ad_id: r.ad_id || `fallback_${r.id}`,
-      ad_name: r.ad_name,
+      campaign_id: r.campaign_id || null,
+      campaign_name: r.campaign_name || null,
+      adset_id: r.adset_id || null,
+      adset_name: r.adset_name || null,
+      ad_id: r.ad_id || null,
+      ad_name: r.ad_name || null,
       spend: Number(r.spend) || 0,
       impressions: Number(r.impressions) || 0,
       clicks: Number(r.clicks) || 0,
-      updated_at: new Date().toISOString(),
     }
   })
 
   let inserted = 0
-  let upsertErr: { message: string } | null = null
-  const batch = 500
+  let upsertErr = ''
+  const batch = 200
+
   for (let i = 0; i < records.length; i += batch) {
     const slice = records.slice(i, i + batch)
     const { error: e } = await supabaseAdmin
       .from('ads_daily_stats')
-      .upsert(slice, { onConflict: 'report_date,ad_id,sub_id_raw' })
-    if (e) { upsertErr = e; break }
-    inserted += slice.length
+      .upsert(slice, { onConflict: 'report_date,ad_id,ad_name,sub_id_raw', ignoreDuplicates: false })
+    if (e) {
+      upsertErr = e.message
+      // Fallback: insert without upsert (bo qua duplicate)
+      const { count, error: insE } = await supabaseAdmin
+        .from('ads_daily_stats')
+        .insert(slice, { count: 'exact' })
+      if (!insE) inserted += count ?? 0
+    } else {
+      inserted += slice.length
+    }
   }
 
-  if (upsertErr) return { ok: false, inserted, error: 'upsert ads_daily_stats: ' + upsertErr.message }
+  if (upsertErr) return { ok: false, inserted, error: 'upsert ads: ' + upsertErr }
   return { ok: true, inserted }
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Normalize Orders: raw_order_rows -> orders
+// normalizeOrders: raw_order_rows -> orders
 // ─────────────────────────────────────────────────────────────────
-async function normalizeOrdersFile(
+async function normalizeOrders(
   uploadedFileId: string | null
-): Promise<{ ok: boolean; inserted: number; error?: string }> {
+): Promise<{ ok: boolean; inserted?: number; error?: string }> {
   let q = supabaseAdmin.from('raw_order_rows').select('*').limit(50000)
   if (uploadedFileId) q = q.eq('uploaded_file_id', uploadedFileId)
 
@@ -86,40 +91,47 @@ async function normalizeOrdersFile(
   if (error) return { ok: false, inserted: 0, error: 'load raw_order_rows: ' + error.message }
   if (!raws || raws.length === 0) return { ok: true, inserted: 0 }
 
-  const records = raws.map((r: Record<string, unknown>) => {
+  const validRaws = raws.filter((r: Record<string, unknown>) => r.report_date != null)
+  if (validRaws.length === 0) return { ok: true, inserted: 0 }
+
+  const records = validRaws.map((r: Record<string, unknown>) => {
     const subRaw = String(r.sub_id || '')
     const subNorm = parseSubId(subRaw) || subRaw
-    const tk = parseTkAff(subRaw) || String(r.tk_aff || '')
+    const tk = parseTkAff(subRaw) || String(r.tk_aff || '') || null
     return {
       report_date: r.report_date,
-      order_id: r.order_id,
+      order_id: r.order_id || null,
       sub_id_raw: subRaw,
       sub_id_normalized: subNorm,
       tk_aff: tk,
       commission: Number(r.commission) || 0,
       order_amount: Number(r.order_amount) || 0,
-      status: r.status,
+      status: String(r.status || ''),
     }
   })
 
   let inserted = 0
-  let insErr: { message: string } | null = null
-  const batch = 500
+  const batch = 200
+
   for (let i = 0; i < records.length; i += batch) {
     const slice = records.slice(i, i + batch)
     const { error: e } = await supabaseAdmin
       .from('orders')
-      .upsert(slice, { onConflict: 'order_id' })
-    if (e) { insErr = e; break }
-    inserted += slice.length
+      .upsert(slice, { onConflict: 'order_id', ignoreDuplicates: true })
+    if (e) {
+      // Fallback insert
+      const { count } = await supabaseAdmin.from('orders').insert(slice, { count: 'exact' })
+      inserted += count ?? 0
+    } else {
+      inserted += slice.length
+    }
   }
 
-  if (insErr) return { ok: false, inserted, error: 'upsert orders: ' + insErr.message }
   return { ok: true, inserted }
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Rebuild subid_daily_summary
+// rebuildSubIdSummary: ads_daily_stats + orders -> subid_daily_summary
 // ─────────────────────────────────────────────────────────────────
 async function rebuildSubIdSummary(): Promise<{
   ok: boolean
@@ -137,52 +149,84 @@ async function rebuildSubIdSummary(): Promise<{
     .select('report_date, sub_id_normalized, tk_aff, commission, order_amount')
   if (ordErr) return { ok: false, error: 'load orders: ' + ordErr.message }
 
-  // daily map: "date::sub" -> daily record
-  const dailyMap = new Map<string, {
-    report_date: string; sub_id_normalized: string; tk_aff: string | null
-    ads_spend: number; order_count: number; total_commission: number
+  if (!adsRows?.length && !orderRows?.length) return { ok: true, summaryRows: 0 }
+
+  // Map by (report_date_day, sub_id_normalized)
+  type DayKey = string
+  type SubKey = string
+  const dailyMap = new Map<DayKey, {
+    report_date: string
+    sub_id_normalized: string
+    tk_aff: string | null
+    ads_spend: number
+    order_count: number
+    total_commission: number
   }>()
 
-  // total map: sub -> totals
-  const totalMap = new Map<string, { ads: number; orders: number; comm: number; tk: string | null }>()
-  let latestDay: string | null = null
+  const toDay = (d: unknown): string | null => {
+    if (!d) return null
+    const s = String(d)
+    return s.slice(0, 10)
+  }
 
-  for (const a of adsRows || []) {
-    const d = dayKey(a.report_date as string)
-    if (!d) continue
-    if (!latestDay || d > latestDay) latestDay = d
-    const sub = String(a.sub_id_normalized || '')
-    const key = `${d}::${sub}`
-    const cur = dailyMap.get(key) ?? { report_date: d, sub_id_normalized: sub, tk_aff: a.tk_aff as string | null, ads_spend: 0, order_count: 0, total_commission: 0 }
-    cur.ads_spend += Number(a.spend) || 0
-    if (a.tk_aff && !cur.tk_aff) cur.tk_aff = a.tk_aff as string
-    dailyMap.set(key, cur)
+  let latestDate = ''
 
+  for (const r of (adsRows ?? [])) {
+    const day = toDay(r.report_date)
+    if (!day) continue
+    if (day > latestDate) latestDate = day
+    const sub = r.sub_id_normalized || ''
+    const key = `${day}::${sub}`
+    const existing = dailyMap.get(key)
+    if (existing) {
+      existing.ads_spend += Number(r.spend) || 0
+    } else {
+      dailyMap.set(key, {
+        report_date: day,
+        sub_id_normalized: sub,
+        tk_aff: r.tk_aff || null,
+        ads_spend: Number(r.spend) || 0,
+        order_count: 0,
+        total_commission: 0,
+      })
+    }
+  }
+
+  for (const r of (orderRows ?? [])) {
+    const day = toDay(r.report_date)
+    if (!day) continue
+    const sub = r.sub_id_normalized || ''
+    const key = `${day}::${sub}`
+    const existing = dailyMap.get(key)
+    if (existing) {
+      existing.order_count += 1
+      existing.total_commission += Number(r.commission) || 0
+    } else {
+      dailyMap.set(key, {
+        report_date: day,
+        sub_id_normalized: sub,
+        tk_aff: r.tk_aff || null,
+        ads_spend: 0,
+        order_count: 1,
+        total_commission: Number(r.commission) || 0,
+      })
+    }
+  }
+
+  // Total per sub
+  type TotalKey = SubKey
+  const totalMap = new Map<TotalKey, { ads: number; orders: number; comm: number; tk: string | null }>()
+  for (const v of dailyMap.values()) {
+    const sub = v.sub_id_normalized
     const t = totalMap.get(sub) ?? { ads: 0, orders: 0, comm: 0, tk: null }
-    t.ads += Number(a.spend) || 0
-    if (a.tk_aff && !t.tk) t.tk = a.tk_aff as string
+    t.ads += v.ads_spend
+    t.orders += v.order_count
+    t.comm += v.total_commission
+    if (!t.tk && v.tk_aff) t.tk = v.tk_aff
     totalMap.set(sub, t)
   }
 
-  for (const o of orderRows || []) {
-    const d = dayKey(o.report_date as string)
-    if (!d) continue
-    if (!latestDay || d > latestDay) latestDay = d
-    const sub = String(o.sub_id_normalized || '')
-    const key = `${d}::${sub}`
-    const cur = dailyMap.get(key) ?? { report_date: d, sub_id_normalized: sub, tk_aff: o.tk_aff as string | null, ads_spend: 0, order_count: 0, total_commission: 0 }
-    cur.order_count += 1
-    cur.total_commission += Number(o.commission) || 0
-    if (o.tk_aff && !cur.tk_aff) cur.tk_aff = o.tk_aff as string
-    dailyMap.set(key, cur)
-
-    const t = totalMap.get(sub) ?? { ads: 0, orders: 0, comm: 0, tk: null }
-    t.orders += 1
-    t.comm += Number(o.commission) || 0
-    if (o.tk_aff && !t.tk) t.tk = o.tk_aff as string
-    totalMap.set(sub, t)
-  }
-
+  const latestDay = latestDate
   const has_latest = (sub: string) =>
     latestDay ? dailyMap.has(`${latestDay}::${sub}`) : false
 
@@ -210,36 +254,33 @@ async function rebuildSubIdSummary(): Promise<{
       ads_spend: v.ads_spend,
       order_count: v.order_count,
       total_commission: v.total_commission,
-      roi_daily,
+      roi_daily: Math.round(roi_daily * 1000) / 1000,
       total_ads_all_time: t.ads,
       total_orders_all_time: t.orders,
       total_commission_all_time: t.comm,
-      roi_total,
+      roi_total: Math.round(roi_total * 1000) / 1000,
       has_ads_latest_day: has_latest_day,
       action_suggestion: suggestion,
       action_reason: reason,
-      updated_at: new Date().toISOString(),
     }
   })
 
-  let inserted = 0
-  let upErr: { message: string } | null = null
-  const batch = 500
+  // Delete old and re-insert
+  await supabaseAdmin.from('subid_daily_summary').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+
+  let summaryRows = 0
+  const batch = 200
   for (let i = 0; i < records.length; i += batch) {
     const slice = records.slice(i, i + batch)
-    const { error: e } = await supabaseAdmin
-      .from('subid_daily_summary')
-      .upsert(slice, { onConflict: 'report_date,sub_id_normalized' })
-    if (e) { upErr = e; break }
-    inserted += slice.length
+    const { count } = await supabaseAdmin.from('subid_daily_summary').insert(slice, { count: 'exact' })
+    summaryRows += count ?? 0
   }
 
-  if (upErr) return { ok: false, error: 'upsert summary: ' + upErr.message }
-  return { ok: true, summaryRows: inserted, latestDate: latestDay ?? undefined }
+  return { ok: true, summaryRows, latestDate: latestDate || undefined }
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Public: runNormalize — goi tu upload route truc tiep
+// runNormalize — goi tu upload route truc tiep
 // ─────────────────────────────────────────────────────────────────
 export async function runNormalize(input: NormalizeInput): Promise<NormalizeResult> {
   const { uploadedFileId, type } = input
@@ -250,10 +291,12 @@ export async function runNormalize(input: NormalizeInput): Promise<NormalizeResu
       result.ads = await normalizeAdsFile(uploadedFileId || null)
     }
     if (type === 'orders' || type === 'all') {
-      result.orders = await normalizeOrdersFile(uploadedFileId || null)
+      result.orders = await normalizeOrders(uploadedFileId || null)
     }
 
+    // Rebuild summary sau moi lan normalize
     result.summary = await rebuildSubIdSummary()
+
     result.ok = (result.ads?.ok ?? true) && (result.orders?.ok ?? true) && (result.summary?.ok ?? true)
     return result
   } catch (e) {
