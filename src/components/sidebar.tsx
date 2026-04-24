@@ -27,16 +27,16 @@ const adminLinks = [
 ]
 
 const mainLinks = [
-  { href: "/tong-quan", label: "Dashboard", icon: LayoutDashboard, exact: true },
-  { href: "/tong-quan", label: "Tổng quan AFF", icon: BarChart3 },
-  { href: "/upload", label: "Upload dữ liệu", icon: Upload },
-  { href: "/sub-id", label: "Quản lý Sub ID", icon: Activity },
-  { href: "/hanh-dong", label: "Hành động loạt", icon: Zap },
-  { href: "/bai-viet", label: "Bài viết chưa ads", icon: FileText },
-  { href: "/quy-tac", label: "Quy tắc tự động", icon: Zap },
-  { href: "/ket-noi", label: "Kết nối Facebook", icon: Facebook },
-  { href: "/nhat-ky", label: "Nhật ký", icon: ScrollText },
-  { href: "/cai-dat", label: "Cài đặt", icon: Settings },
+  { href: "/dashboard/tong-quan", label: "Dashboard", icon: LayoutDashboard, exact: true },
+  { href: "/dashboard/tong-quan", label: "Tổng quan AFF", icon: BarChart3 },
+  { href: "/dashboard/upload", label: "Upload dữ liệu", icon: Upload },
+  { href: "/dashboard/sub-id", label: "Quản lý Sub ID", icon: Activity },
+  { href: "/dashboard/hanh-dong", label: "Hành động loạt", icon: Zap },
+  { href: "/dashboard/bai-viet", label: "Bài viết chưa ads", icon: FileText },
+  { href: "/dashboard/quy-tac", label: "Quy tắc tự động", icon: Zap },
+  { href: "/dashboard/ket-noi", label: "Kết nối Facebook", icon: Facebook },
+  { href: "/dashboard/nhat-ky", label: "Nhật ký", icon: ScrollText },
+  { href: "/dashboard/settings", label: "Cài đặt", icon: Settings },
 ]
 
 export function Sidebar() {
